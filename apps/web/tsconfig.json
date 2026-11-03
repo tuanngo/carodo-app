@@ -1,0 +1,10 @@
+{
+  // The Worker and its tests, which run in workerd. vitest.config.ts runs in Node: tsconfig.node.json.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"]
+  },
+  "include": ["src", "test"]
+}

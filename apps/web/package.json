@@ -1,0 +1,23 @@
+{
+  "name": "@carodo/web",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "wrangler dev --port 8081",
+    "test": "vitest run",
+    "types": "wrangler types --include-env=false",
+    "typecheck": "wrangler types --include-env=false --check && tsc -p tsconfig.json && tsc -p tsconfig.node.json"
+  },
+  "dependencies": {
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@carodo/api": "workspace:*",
+    "@cloudflare/vitest-plugin": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}
