@@ -1,0 +1,18 @@
+{
+  // What every package shares. `types` and `paths` belong to the package that needs them.
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2024",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2024"],
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": []
+  }
+}

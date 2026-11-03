@@ -1,5 +1,40 @@
-# Shortcuts for the backend and the share-link web: `task --list`. Run them here, or from the
-# workspace root as `task app:<name>`. Tasks are added with the code they run (backend/, web/).
+# Shortcuts for the backend Workers: `task --list`. Run them here, or from the workspace root as
+# `task app:<name>`. Each wraps a pnpm script, so `pnpm run <name>` does the same without go-task.
 version: '3'
 
-tasks: {}
+tasks:
+  install:
+    desc: Install dependencies (pnpm through corepack, the version in package.json)
+    cmds: [pnpm install]
+
+  dev:
+    desc: Run both Workers locally (api :8080, web :8081; the API binding connects them)
+    cmds: [pnpm run dev]
+
+  test:
+    desc: Run every test in the Workers runtime
+    cmds: [pnpm run test]
+
+  typecheck:
+    desc: Check generated binding types are current, then type-check both Workers
+    cmds: [pnpm run typecheck]
+
+  types:
+    desc: Regenerate worker-configuration.d.ts after a wrangler.jsonc change
+    cmds: [pnpm run types]
+
+  format:
+    desc: Format and fix with Biome
+    cmds: [pnpm run format]
+
+  lint:
+    desc: Check formatting, lint and import boundaries without changing files
+    cmds: [pnpm run lint]
+
+  check:
+    desc: lint, typecheck and test; run before committing
+    cmds: [pnpm run check]
+
+  db:reset:
+    desc: Recreate the local D1 database from the migrations
+    cmds: [pnpm run db:reset]

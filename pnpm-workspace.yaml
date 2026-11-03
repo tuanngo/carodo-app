@@ -1,0 +1,23 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Every external version, once: each package.json says `catalog:`, so api and web cannot drift.
+# Only releases older than pnpm's minimum release age; never add minimumReleaseAgeExclude to take
+# a newer one (a day-old release waits a day).
+# A new entry is a new dependency and needs the owner's approval (carodo-ios AGENTS.md, P6).
+catalog:
+  "@biomejs/biome": 2.6.4
+  "@cloudflare/vitest-plugin": 1.4.12
+  "@types/node": 26.6.6
+  hono: 4.13.16
+  typescript: 7.0.2
+  vitest: 5.0.5
+  wrangler: 4.156.1
+
+# Packages that run an install script. pnpm refuses any other.
+# workerd downloads the runtime binary; esbuild its native binary.
+allowBuilds:
+  esbuild: true
+  workerd: true
+

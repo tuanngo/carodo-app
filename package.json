@@ -1,0 +1,24 @@
+{
+  "name": "carodo-app",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "types": "pnpm -r run types",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check": "pnpm run lint && pnpm run typecheck && pnpm run test",
+    "db:reset": "pnpm --filter @carodo/api --fail-if-no-match run db:reset"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "catalog:",
+    "typescript": "catalog:"
+  },
+  "license": "UNLICENSED"
+}
