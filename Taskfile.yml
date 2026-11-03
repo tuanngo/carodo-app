@@ -1,0 +1,5 @@
+# Shortcuts for the backend and the share-link web: `task --list`. Run them here, or from the
+# workspace root as `task app:<name>`. Tasks are added with the code they run (backend/, web/).
+version: '3'
+
+tasks: {}
