@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // carodo-api: the HTTP API the iOS app calls (contract: carodo-ios docs/api/carodo-api.yaml) and
+  // `WebRpc`, the entrypoint the web Worker reaches by service binding (docs/decisions/0001).
+  // This top level is local development; staging and production environments come with the first
+  // deploy, and an environment inherits no bindings, so each one redeclares them all.
+  "name": "carodo-api",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-11-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  "workers_dev": false,
+  "preview_urls": false,
+  // Logs whole (a line is written only when something happened); traces sampled. Never log a
+  // coordinate, a token or a ciphertext (carodo-ios AGENTS.md, P5).
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+  },
+  "vars": {
+    "ENVIRONMENT": "local"
+  },
+  // Local resolves the database by name; the id is a placeholder until the remote one exists.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "carodo-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}
