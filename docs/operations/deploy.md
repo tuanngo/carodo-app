@@ -60,9 +60,10 @@ too heavy for the Worker). It holds nothing but those files, under keys hashed f
 staging and production share it; a reader's request reaches R2 through Cloudflare only, no binding:
 
 ```sh
-task wrangler:production -- web r2 bucket create carodo-media --location apac
+task wrangler:production -- web r2 bucket create carodo-media --location apac --update-config=false
 # Dashboard → R2 → carodo-media → Settings → Custom Domains → media.carodo.app (the carodo.app zone).
-# Keep the r2.dev URL off: it is rate-limited and uncached.
+# Keep the r2.dev URL off: it is rate-limited and uncached. No binding: if Wrangler added one to
+# apps/web/wrangler.jsonc, revert it (the web owns no store, ADR 0001).
 task media:upload                                     # also run by every deploy, before the web
 ```
 

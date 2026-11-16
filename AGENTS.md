@@ -166,6 +166,8 @@ C14. **Measure before done:** rows read and written, subrequests and CPU, stated
 ## Conventions
 
 - **Formatting:** Biome only (2 spaces, 120 columns, double quotes); never add Prettier or ESLint.
+  `wrangler.jsonc` is the exception: Biome skips it and it stays in Wrangler's own format (tabs,
+  one value a line), so a change Wrangler writes into it shows as a small diff.
 - **Tests:** `test/unit/<domain>/<subject>.test.ts` for plain code (Node, instant) and
   `test/workers/<domain>/<subject>.test.ts` for anything with a binding, D1, a route or the Workers runtime
   (workerd, `@cloudflare/vitest-plugin`); a service that touches D1 is tested against D1 built from
