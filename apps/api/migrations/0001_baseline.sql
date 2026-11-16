@@ -1,22 +1,31 @@
 -- Carodo backend, D1 baseline (DRAFT for review, carodo-ios ADR 0010, 0011).
 -- The server holds only what is public or shared, and encrypted backups it cannot read.
 --
+-- Constraints (owner, 2026-11-15, after linkto): an account and what it owns are tied by foreign
+-- keys with ON DELETE CASCADE, so erasing the account row erases the rest; an auxiliary table
+-- (policies, caches, logs) has none. CHECK only on a system job table's status. Every other fixed
+-- set is lowercase text ('anonymous', 'rain') checked by its service (ADR 0003).
+-- Every foreign key column on the child side has an index: deleting an account cascades through
+-- them, and without one SQLite reads the whole child table (test/workers/setup.ts catches it).
 -- Naming: plural snake_case tables; `_id` references, `_at` instants as INTEGER Unix ms,
--- `_m` / `_s` units, booleans as INTEGER 0/1, JSON as TEXT checked with json_valid().
+-- `_m` / `_s` units, booleans as INTEGER 0/1, JSON as TEXT.
 -- Indexes `<table>_on_<columns>`; each one serves a query named beside it (D1 bills rows read).
--- Server ids are UUIDv7 (time-ordered); trip ids are the device's UUIDs.
+-- Server ids are UUIDv7 (time-ordered), except a Feed item's (random); trip ids are the device's UUIDs.
+-- Tables arrive with the slice that uses them; none is created ahead of its code.
 
 -- ── Identity ────────────────────────────────────────────────────────────────
 
 CREATE TABLE accounts (
   id            TEXT PRIMARY KEY,
-  username      TEXT NOT NULL UNIQUE COLLATE NOCASE,  -- [a-z0-9_.]{3,20} (ADR 0008)
-  display_name  TEXT,
-  avatar_key    TEXT,                                 -- R2 object key
+  username      TEXT NOT NULL UNIQUE COLLATE NOCASE,  -- lowercase (ADR 0008); 'deleted:<id>' once deleted
+  display_name  TEXT,                                 -- unused in Feed V1
+  avatar_key    TEXT,                                 -- unused in Feed V1
   secret_hash   TEXT NOT NULL,                        -- SHA-256 of the account secret
-  feed_opt_in   INTEGER NOT NULL DEFAULT 0,
-  live_opt_in   INTEGER NOT NULL DEFAULT 0,
-  region_cell   TEXT,                                 -- coarse, computed on the device (Nearby)
+  feed_opt_in   INTEGER NOT NULL DEFAULT 0,           -- Sharing.sharing: publishes car drives to the Feed
+  display_as    TEXT NOT NULL DEFAULT 'anonymous',    -- Sharing.displayAs: 'anonymous' | 'username'
+  show_vehicle  INTEGER NOT NULL DEFAULT 1,           -- Sharing.showVehicle
+  live_opt_in   INTEGER NOT NULL DEFAULT 0,           -- unused in Feed V1
+  region_code   TEXT,                                 -- unused in Feed V1
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL,
   deleted_at    INTEGER                               -- erased within 30 days
@@ -27,7 +36,7 @@ CREATE TABLE app_keys (
   id           TEXT PRIMARY KEY,                      -- App Attest key id
   public_key   BLOB NOT NULL,
   counter      INTEGER NOT NULL DEFAULT 0,            -- assertions must raise it (no replay)
-  environment  TEXT NOT NULL CHECK (environment IN ('production', 'development')),
+  environment  TEXT NOT NULL,                         -- 'production' | 'development'
   attested_at  INTEGER NOT NULL,
   last_used_at INTEGER NOT NULL
 );
@@ -42,153 +51,126 @@ CREATE INDEX auth_challenges_on_expires_at ON auth_challenges (expires_at);  -- 
 CREATE TABLE sessions (
   id           TEXT PRIMARY KEY,
   account_id   TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  app_key_id   TEXT NOT NULL REFERENCES app_keys (id),  -- tokens are bound to an attested key
+  app_key_id   TEXT NOT NULL REFERENCES app_keys (id), -- tokens are bound to an attested key
   family_id    TEXT NOT NULL,
   refresh_hash TEXT NOT NULL UNIQUE,
   expires_at   INTEGER NOT NULL,
   created_at   INTEGER NOT NULL,
   revoked_at   INTEGER
 );
-CREATE INDEX sessions_on_account_id ON sessions (account_id);  -- sign out everywhere
-CREATE INDEX sessions_on_family_id ON sessions (family_id);    -- refresh reuse
+CREATE INDEX sessions_on_account_id ON sessions (account_id);  -- revoke on deletion, erase
+CREATE INDEX sessions_on_family_id ON sessions (family_id);    -- refresh reuse: revoke the family
+-- A family is one device's session: its live row is the one an access token is checked against.
+CREATE UNIQUE INDEX sessions_on_live_family_id ON sessions (family_id) WHERE revoked_at IS NULL;
+CREATE INDEX sessions_on_expires_at ON sessions (expires_at);                                -- prune
 
-CREATE TABLE apple_links (
-  account_id TEXT PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
-  apple_sub  TEXT NOT NULL UNIQUE,
-  created_at INTEGER NOT NULL
+-- A deleted account's username, and a renamed account's old one, held 90 days so nobody can take
+-- it at once to impersonate (specs/account.md). Linked to nothing: an HMAC of the lowercase name
+-- under a key derived from SECRET_KEY, so a copy of the table cannot be read back with a list of names.
+CREATE TABLE username_holds (
+  name_hash   TEXT PRIMARY KEY,
+  released_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX username_holds_on_released_at ON username_holds (released_at);  -- prune
+
+-- Username changes, for the limit of 3 in 30 days (contract PUT /v1/me/profile); pruned after 30 days.
+CREATE TABLE username_changes (
+  id         TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+  changed_at INTEGER NOT NULL
 );
+CREATE INDEX username_changes_on_account_id ON username_changes (account_id, changed_at);  -- the limit, erase
+CREATE INDEX username_changes_on_changed_at ON username_changes (changed_at);              -- prune
 
--- ── Feed and leaderboard (ADR 0007: how, never where) ───────────────────────
+-- Names nobody may claim, beside the reserved words in code (services/accounts/usernames.ts). Auxiliary: no key.
+-- Filled from seeds/username-policies.sql (idempotent upsert; linkto's slug_policies).
+--   kind: 'reserved' | 'profane' (the refusal's reason); match: 'exact' (the whole name, without
+--   '.' and '_') | 'contains' (anywhere in it).
+CREATE TABLE username_policies (
+  name       TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  match      TEXT NOT NULL,
+  note       TEXT,
+  created_at INTEGER NOT NULL
+) WITHOUT ROWID;
 
-CREATE TABLE published_drives (
+-- ── Feed (ADR 0007: how, never where) ───────────────────────────────────────
+
+-- A car drive the person published to the Feed: its public summary, never a route or a place.
+-- Times follow ADR 0007: when it happened comes from the device (started_at, ended_at, local_date,
+-- local_start_hour, part_of_day), when the server learnt of it from the server (published_at,
+-- updated_at). A change counts only with a higher revision; unpublishing keeps the row as a
+-- tombstone (with its revision) for 30 days, so a late, older PUT cannot publish it again. Stop
+-- sharing sets stopped_at: the drive leaves the Feed, and a republish at the same revision brings
+-- it back. Account deletion and moderation set hidden_at. A drive is visible when all three are NULL.
+CREATE TABLE drives (
   trip_id       TEXT PRIMARY KEY,
   account_id    TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+  -- Its Feed item: the author's local day. NULL for a tombstone that never had a drive.
+  item_id       TEXT REFERENCES feed_items (id) ON DELETE CASCADE,
+  vehicle_kind  TEXT NOT NULL DEFAULT 'car',          -- unused in Feed V1 (car drives only)
   vehicle_make  TEXT,
   vehicle_model TEXT,
-  distance_m    REAL NOT NULL,
-  duration_s    REAL NOT NULL,
-  tags          TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tags)),
-  drove_at      INTEGER NOT NULL,                     -- rounded to the hour: no exact time
-  region_cell   TEXT,
-  published_at  INTEGER NOT NULL,
-  hidden_at     INTEGER
+  distance_m    REAL NOT NULL,                        -- GPS-estimated, never the odometer (P2)
+  moving_duration_s  REAL NOT NULL,
+  elapsed_duration_s REAL NOT NULL,
+  ranked        INTEGER NOT NULL DEFAULT 1,           -- unused in Feed V1
+  tags          TEXT NOT NULL DEFAULT '[]',           -- unused in Feed V1
+  -- Times are kept exact for the server's own logic (the age, the busiest hour) and never leave
+  -- it: every time in a response goes through services/shared/coarse-time.ts (carodo-ios ADR 0007).
+  started_at    INTEGER NOT NULL,                     -- as the device sent it; never in a response
+  ended_at      INTEGER NOT NULL,                     -- as the device sent it; never in a response
+  drove_at      INTEGER NOT NULL,                     -- publicHour(started_at): the drive's age
+  local_date    TEXT NOT NULL,                        -- 'YYYY-MM-DD' in the drive's own zone: its item
+  local_start_hour INTEGER,                           -- 0–23 local: only the busiest-hour statistic
+  region_code   TEXT,                                 -- unused in Feed V1
+  area_name     TEXT,                                 -- unused in Feed V1
+  area_country  TEXT,                                 -- unused in Feed V1
+  part_of_day   TEXT,                                 -- 'early_morning' … 'late_night' (contract PartOfDay)
+  weather       TEXT,                                 -- 'rain' | 'clear' | 'unknown', from the device
+  shape         TEXT,                                 -- DriveShape JSON as the device sent it
+  revision      INTEGER NOT NULL,                     -- the trip's revision on the device; only a higher one is applied
+  published_at  INTEGER NOT NULL,                     -- server time of the first publish
+  updated_at    INTEGER NOT NULL,                     -- server time of the last applied change
+  unpublished_at INTEGER,                             -- tombstone, pruned after 30 days
+  stopped_at    INTEGER,                              -- removed by Stop sharing
+  hidden_at     INTEGER                               -- account deletion, moderation
 );
--- Feed: visible drives, newest first, all regions or one.
-CREATE INDEX published_drives_on_feed ON published_drives (drove_at DESC) WHERE hidden_at IS NULL;
-CREATE INDEX published_drives_on_region_feed ON published_drives (region_cell, drove_at DESC) WHERE hidden_at IS NULL;
-CREATE INDEX published_drives_on_account_id ON published_drives (account_id, drove_at);  -- profile, rollup
+CREATE INDEX drives_on_item_id ON drives (item_id);              -- a Feed page's drives, an item's refresh
+CREATE INDEX drives_on_account_id ON drives (account_id, local_date);  -- Stop sharing, deletion, erase, the day's cap
+-- Community numbers over 72 hours: the visible drives that ended in the window.
+CREATE INDEX drives_on_ended_at ON drives (ended_at)
+  WHERE hidden_at IS NULL AND unpublished_at IS NULL AND stopped_at IS NULL;
+CREATE INDEX drives_on_unpublished_at ON drives (unpublished_at) WHERE unpublished_at IS NOT NULL;  -- prune tombstones
 
--- Precomputed by cron as sums (a re-run lands on the same rows); read one page by rank.
-CREATE TABLE leaderboard_rows (
-  period       TEXT NOT NULL CHECK (period IN ('week', 'month')),
-  period_start TEXT NOT NULL,                         -- '2026-11-02' (Monday / 1st, UTC)
-  scope        TEXT NOT NULL,                         -- 'global' or a region cell
-  metric       TEXT NOT NULL CHECK (metric IN ('distance', 'duration')),
-  account_id   TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  value        REAL NOT NULL,
-  rank         INTEGER NOT NULL,
-  computed_at  INTEGER NOT NULL,
-  PRIMARY KEY (period, period_start, scope, metric, account_id)
-) WITHOUT ROWID;
-CREATE INDEX leaderboard_rows_on_rank ON leaderboard_rows (period, period_start, scope, metric, rank);
-
--- Community stats over 72 h, one row an hour (rolled up from Analytics Engine and drives).
-CREATE TABLE stats_hourly (
-  hour_at    INTEGER PRIMARY KEY,
-  drivers    INTEGER NOT NULL,
-  distance_m REAL NOT NULL,
-  duration_s REAL NOT NULL
-);
-
--- ── Sharing ─────────────────────────────────────────────────────────────────
-
-CREATE TABLE shares (
-  token         TEXT PRIMARY KEY,                     -- unguessable, in the public link
-  trip_id       TEXT NOT NULL,
-  account_id    TEXT REFERENCES accounts (id) ON DELETE CASCADE,
-  route         BLOB NOT NULL,                        -- privacy-trimmed on the device
-  distance_m    REAL NOT NULL,
-  duration_s    REAL NOT NULL,
-  vehicle_make  TEXT,
-  vehicle_model TEXT,
-  image_key     TEXT,                                 -- R2 preview image
+-- A Feed item: one person's car drives on one local day. Its id is random and kept for the item's
+-- life, also when a drive joins or leaves it, so its reactions stay on it; nothing links it to the
+-- account in a response. sort_hour = publicHour(last_ended_at), the hour of its newest visible
+-- drive's end; NULL when it has no visible drive (then it is not on the Feed).
+CREATE TABLE feed_items (
+  id            TEXT PRIMARY KEY,
+  account_id    TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+  local_date    TEXT NOT NULL,
+  sort_hour     INTEGER,
+  last_ended_at INTEGER,                              -- exact, never in a response
   created_at    INTEGER NOT NULL,
-  revoked_at    INTEGER
+  UNIQUE (account_id, local_date)                     -- a drive's item; refresh, Stop sharing, erase
 );
-CREATE INDEX shares_on_account_id ON shares (account_id, created_at);  -- revoke on delete
+-- The Feed: newest first by hour, then by the random id, so the order tells no finer time (keyset pages).
+CREATE INDEX feed_items_on_feed ON feed_items (sort_hour DESC, id DESC) WHERE sort_hour IS NOT NULL;
 
--- ── Encrypted backups (ADR 0011): ciphertext in R2, metadata here ───────────
-
-CREATE TABLE backups (
+-- One reaction per reader per item (contract Reaction: 'fire' | 'coffee' | 'clap' | 'road' | 'party').
+-- Who reacted is never returned, only the counts.
+CREATE TABLE reactions (
+  item_id    TEXT NOT NULL REFERENCES feed_items (id) ON DELETE CASCADE,
   account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  trip_id    TEXT NOT NULL,
-  revision   INTEGER NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  object_key TEXT NOT NULL,                           -- R2: backups/<account_id>/<trip_id>
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (account_id, trip_id)
+  reaction   TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (item_id, account_id)                   -- a page's counts, PUT and DELETE
 ) WITHOUT ROWID;
-CREATE INDEX backups_on_updated_at ON backups (account_id, updated_at, trip_id);  -- list ?after=
-
-CREATE TABLE backup_keys (
-  account_id TEXT PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
-  kdf        TEXT NOT NULL,
-  iterations INTEGER NOT NULL,
-  salt       BLOB NOT NULL,
-  wrapped    BLOB NOT NULL,                           -- useless without the recovery code
-  updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE web_sessions (
-  id           TEXT PRIMARY KEY,
-  public_key   BLOB NOT NULL,                         -- the browser's ephemeral P-256 key
-  poll_hash    TEXT NOT NULL,
-  status       TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'ended')),
-  account_id   TEXT REFERENCES accounts (id) ON DELETE CASCADE,
-  sealed_key   BLOB,                                  -- relayed once, cleared after pickup
-  token_hash   TEXT UNIQUE,
-  expires_at   INTEGER NOT NULL,
-  created_at   INTEGER NOT NULL,
-  approved_at  INTEGER
-);
-CREATE INDEX web_sessions_on_account_id ON web_sessions (account_id) WHERE status = 'approved';  -- list, end
-CREATE INDEX web_sessions_on_expires_at ON web_sessions (expires_at);                          -- prune
-
--- ── Safety (App Store 1.2) ──────────────────────────────────────────────────
-
-CREATE TABLE reports (
-  id                  TEXT PRIMARY KEY,
-  reporter_account_id TEXT REFERENCES accounts (id) ON DELETE SET NULL,
-  target_account_id   TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  reason              TEXT NOT NULL,
-  note                TEXT,
-  created_at          INTEGER NOT NULL,
-  resolved_at         INTEGER
-);
-CREATE INDEX reports_on_open ON reports (created_at) WHERE resolved_at IS NULL;  -- moderation queue
-
-CREATE TABLE blocks (
-  account_id         TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  blocked_account_id TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  created_at         INTEGER NOT NULL,
-  PRIMARY KEY (account_id, blocked_account_id)
-) WITHOUT ROWID;
+CREATE INDEX reactions_on_account_id ON reactions (account_id, item_id);  -- the reader's own, deletion, erase
 
 -- ── Jobs (linkto ADR 0017, 0018) ────────────────────────────────────────────
-
--- Facts already true, published once to each consumer (push, moderation, rollups).
-CREATE TABLE outbox_events (
-  id             TEXT PRIMARY KEY,
-  aggregate_type TEXT NOT NULL,                       -- 'account', 'drive', 'share'
-  aggregate_id   TEXT NOT NULL,
-  event_type     TEXT NOT NULL,                       -- 'drive.published', 'share.revoked', …
-  payload        TEXT NOT NULL CHECK (json_valid(payload)),
-  attempts       INTEGER NOT NULL DEFAULT 0,
-  last_error     TEXT,
-  created_at     INTEGER NOT NULL,
-  published_at   INTEGER
-);
-CREATE INDEX outbox_events_on_unpublished ON outbox_events (created_at) WHERE published_at IS NULL;  -- drain
 
 -- Work still owed, coalesced per target (an R2 delete after an account is erased).
 CREATE TABLE pending_ops (
@@ -203,7 +185,7 @@ CREATE TABLE pending_ops (
 CREATE INDEX pending_ops_on_next_attempt_at ON pending_ops (next_attempt_at);  -- due work
 
 CREATE TABLE job_states (
-  job         TEXT PRIMARY KEY,                       -- 'leaderboard.rollup', …
+  job         TEXT PRIMARY KEY,                       -- 'account.erase', …
   cursor      TEXT,
   lease_until INTEGER,
   updated_at  INTEGER NOT NULL
@@ -219,5 +201,5 @@ CREATE TABLE job_runs (
 );
 CREATE INDEX job_runs_on_job ON job_runs (job, started_at DESC);
 
--- Not in D1 on purpose: live status and rate limits (Durable Objects), counters
--- (Analytics Engine), blobs (R2), any GPS fix in readable form (never).
+-- Not in D1 on purpose: rate limits (the Rate Limiting binding), counters (Analytics Engine),
+-- blobs (R2), any GPS fix in readable form (never).

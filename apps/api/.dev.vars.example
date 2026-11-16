@@ -1,0 +1,10 @@
+# Copy to .dev.vars (gitignored) and fill in; wrangler dev reads it and it overrides `vars`.
+# docs/operations/local.md "Local settings".
+
+# <Team ID>.app.carodo.ios: the Team ID the iOS app is signed with on this Mac
+# (DEVELOPMENT_TEAM in carodo-ios Configs/Local.xcconfig; a Personal Team works).
+APP_ID=XXXXXXXXXX.app.carodo.ios
+
+# The root every server key is derived from (HKDF, one label per use: tokens, …); local only.
+# Any long random string (openssl rand -base64 32).
+SECRET_KEY=

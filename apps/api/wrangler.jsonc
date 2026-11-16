@@ -1,27 +1,64 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // carodo-api: the HTTP API the iOS app calls (contract: carodo-ios docs/api/carodo-api.yaml) and
-  // `WebRpc`, the entrypoint the web Worker reaches by service binding (docs/decisions/0001).
-  // This top level is local development; staging and production environments come with the first
-  // deploy, and an environment inherits no bindings, so each one redeclares them all.
-  "name": "carodo-api",
+  // `WebRpc`, the entrypoint the web Worker reaches by service binding (ADR 0001).
+  //
+  // Three environments on one Cloudflare account (ADR 0004): this top level is local, `staging` and
+  // `production` are below. The top level is named `-local`, so a deploy that forgets `--env` cannot
+  // replace a real Worker. An environment inherits no bindings and no vars: each one redeclares them
+  // all under its own Worker, store, dataset and rate-limit namespace names. The account comes from
+  // `.env.deploy` through scripts/wrangler.mjs (docs/operations/deploy.md), never in this file.
+  "name": "carodo-api-local",
   "main": "./src/index.ts",
   "compatibility_date": "2026-11-03",
   "compatibility_flags": ["nodejs_compat"],
   "upload_source_maps": true,
   "workers_dev": false,
   "preview_urls": false,
-  // Logs whole (a line is written only when something happened); traces sampled. Never log a
-  // coordinate, a token or a ciphertext (carodo-ios AGENTS.md, P5).
+  // Our own lines only, whole (a line is written only when something happened, C13); no invocation
+  // log per request, which is billed volume and records the URL, where a share token travels (P5).
+  // Traces off: provider traces can capture request URLs and location/device metadata. Request
+  // metrics use route patterns in Analytics Engine instead, never raw paths, tokens or coordinates.
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
-    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
+    "traces": { "enabled": false }
   },
+  // APP_ID is `<Team ID>.<bundle id>` (App Attest rpIdHash). Not a secret; locally each machine
+  // sets its own Team ID in .dev.vars (the iOS repo's Configs/Local.xcconfig), which overrides this.
+  // APP_ATTEST_ENVIRONMENTS: the App Attest environments accepted, comma separated; Xcode builds
+  // attest in `development`, TestFlight and App Store builds in `production`.
+  // APP_ATTEST_DEBUG: "1" accepts the `carodo-debug` proof (simulator, Personal Team); local and
+  // staging only, never production (carodo-ios docs/sync.md "App Attest").
   "vars": {
-    "ENVIRONMENT": "local"
+    "ENVIRONMENT": "local",
+    "APP_ID": "LOCALDEV00.app.carodo.ios",
+    "APP_ATTEST_ENVIRONMENTS": "development",
+    "APP_ATTEST_DEBUG": "1"
   },
-  // Local resolves the database by name; the id is a placeholder until the remote one exists.
+  // Jobs (src/jobs/scheduled.ts): hourly, off the hour. Locally, with `task dev` running:
+  // curl "localhost:8080/cdn-cgi/handler/scheduled?cron=17+*+*+*+*"
+  "triggers": { "crons": ["17 * * * *"] },
+  // Secrets: named here so the generated types never depend on a machine's .dev.vars; the values
+  // come from .dev.vars locally and `wrangler secret put --env <name>` when deployed.
+  "secrets": { "required": ["SECRET_KEY"] },
+  // Workers Rate Limiting (ADR 0002): per location, eventually consistent; a brake, not a quota.
+  // `period` is 10 or 60 seconds; `namespace_id` is account-wide, so it is banded per environment
+  // (1xxx local, 2xxx staging, 3xxx production).
+  "ratelimits": [
+    // Before a key is attested (challenge), keyed by address: carrier NAT shares one, so generous.
+    { "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
+    // Claims per attested key (ADR 0009); a brake on scripts, the exact per-device limit is DeviceCheck's.
+    { "name": "RL_CLAIM", "namespace_id": "1002", "simple": { "limit": 5, "period": 60 } },
+    // Writes per attested key (publish, unpublish, …): far above what a person does, a brake on scripts.
+    { "name": "RL_WRITE", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
+    // Reads per attested key (Feed, leaderboard): a person scrolling stays far below it.
+    { "name": "RL_READ", "namespace_id": "1004", "simple": { "limit": 120, "period": 60 } }
+  ],
+  // Local resolves the database by name; the id is never sent anywhere. Deployed environments name
+  // no id at all: Wrangler finds `carodo-staging` and `carodo` by name on the account. Remote
+  // databases are created by the owner with `--location apac`, near most drivers (ADR 0006); a
+  // location is chosen only at creation.
   "d1_databases": [
     {
       "binding": "DB",
@@ -29,5 +66,88 @@
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "./migrations"
     }
-  ]
+  ],
+  // Objects named by id, never by a token or a person (docs/storage.md).
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "carodo-local" }],
+  // Counters and request metrics (docs/metrics.md); positions are append-only.
+  "analytics_engine_datasets": [
+    { "binding": "EVENTS", "dataset": "carodo_events_local" },
+    { "binding": "METRICS", "dataset": "carodo_metrics_local" }
+  ],
+
+  "env": {
+    // api-stg.carodo.app on the shared Cloudflare account, with its own D1, R2, Analytics Engine
+    // datasets and rate-limit namespaces (ADR 0004). Takes Xcode and TestFlight builds, and the
+    // debug proof until the paid Apple Developer Program gives a build App Attest.
+    "staging": {
+      "name": "carodo-api-staging",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "api-stg.carodo.app", "custom_domain": true }],
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "APP_ID": "TEAMID0000.app.carodo.ios",
+        "APP_ATTEST_ENVIRONMENTS": "development,production",
+        "APP_ATTEST_DEBUG": "1"
+      },
+      "triggers": { "crons": ["17 * * * *"] },
+      "secrets": { "required": ["SECRET_KEY"] },
+      "ratelimits": [
+        { "name": "RL_AUTH", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_CLAIM", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_WRITE", "namespace_id": "2003", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_READ", "namespace_id": "2004", "simple": { "limit": 120, "period": 60 } }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "carodo-staging",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "carodo-staging" }],
+      "analytics_engine_datasets": [
+        { "binding": "EVENTS", "dataset": "carodo_events_staging" },
+        { "binding": "METRICS", "dataset": "carodo_metrics_staging" }
+      ],
+      // Runs near D1 when a request makes several calls to it (ADR 0006).
+      "placement": { "mode": "smart" }
+    },
+
+    // api.carodo.app only; App Store and TestFlight builds attest in `production`.
+    "production": {
+      "name": "carodo-api",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "api.carodo.app", "custom_domain": true }],
+      "vars": {
+        "ENVIRONMENT": "production",
+        "APP_ID": "TEAMID0000.app.carodo.ios",
+        "APP_ATTEST_ENVIRONMENTS": "production",
+        "APP_ATTEST_DEBUG": "0"
+      },
+      "triggers": { "crons": ["17 * * * *"] },
+      "secrets": { "required": ["SECRET_KEY"] },
+      "ratelimits": [
+        { "name": "RL_AUTH", "namespace_id": "3001", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_CLAIM", "namespace_id": "3002", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_WRITE", "namespace_id": "3003", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_READ", "namespace_id": "3004", "simple": { "limit": 120, "period": 60 } }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "carodo",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "carodo" }],
+      "analytics_engine_datasets": [
+        { "binding": "EVENTS", "dataset": "carodo_events" },
+        { "binding": "METRICS", "dataset": "carodo_metrics" }
+      ],
+      // Runs near D1 when a request makes several calls to it (ADR 0006).
+      "placement": { "mode": "smart" }
+    }
+  }
 }

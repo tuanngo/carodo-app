@@ -2,7 +2,10 @@
   // The Worker and its tests, which run in workerd. vitest.config.ts runs in Node: tsconfig.node.json.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // test/support imports with .ts so Node can run it in scripts/ unchanged.
+    "allowImportingTsExtensions": true,
     "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  "exclude": ["test/**/*.node.test.ts"]
 }

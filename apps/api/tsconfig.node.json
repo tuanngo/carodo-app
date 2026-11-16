@@ -1,7 +1,9 @@
 {
+  // What runs in Node: the Vitest config and the tests that use Node's own APIs
+  // (`*.node.test.ts`). Everything else is type-checked as Worker code by tsconfig.json.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["vitest.config.ts"]
+  "include": ["vitest.config.ts", "test/**/*.node.test.ts"]
 }

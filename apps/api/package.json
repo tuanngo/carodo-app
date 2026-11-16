@@ -7,11 +7,16 @@
     "./web-contract": "./src/rpc/types/index.ts"
   },
   "scripts": {
-    "dev": "wrangler dev --port 8080",
+    "dev": "wrangler dev --port 8080 --inspector-port 9280",
+    "dev:lan": "wrangler dev --ip 0.0.0.0 --port 8080 --inspector-port 9280",
     "test": "vitest run",
-    "types": "wrangler types",
-    "typecheck": "wrangler types --check && tsc -p tsconfig.json && tsc -p tsconfig.node.json",
-    "db:reset": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply DB --local"
+    "test:unit": "vitest run --project unit",
+    "test:workers": "vitest run --project workers",
+    "test:changed": "vitest run --changed",
+    "types": "wrangler types --strict-vars=false",
+    "typecheck": "wrangler types --strict-vars=false --check && tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "db:reset": "rm -rf .wrangler/state/v3/d1 && wrangler d1 migrations apply DB --local && pnpm run db:seed",
+    "db:seed": "wrangler d1 execute DB --local --file=seeds/username-policies.sql"
   },
   "dependencies": {
     "hono": "catalog:"
