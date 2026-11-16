@@ -2,19 +2,30 @@
   "name": "carodo-app",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.16.1",
+  "packageManager": "pnpm@12.18.0",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "dev": "pnpm -r --parallel run dev",
+    "dev:lan": "pnpm -r --parallel run dev:lan",
     "test": "pnpm -r run test",
+    "test:changed": "pnpm -r --if-present run test:changed",
     "typecheck": "pnpm -r run typecheck",
     "types": "pnpm -r run types",
     "lint": "biome check .",
     "format": "biome check --write .",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run test",
-    "db:reset": "pnpm --filter @carodo/api --fail-if-no-match run db:reset"
+    "db:reset": "pnpm --filter @carodo/api --fail-if-no-match run db:reset",
+    "wrangler:staging": "node scripts/wrangler.mjs staging",
+    "wrangler:production": "node scripts/wrangler.mjs production",
+    "media:upload": "node apps/web/scripts/upload-media.mjs",
+    "db:migrate:staging": "node scripts/wrangler.mjs staging api d1 migrations apply DB --remote",
+    "db:migrate:production": "node scripts/wrangler.mjs production api d1 migrations apply DB --remote",
+    "db:policies:staging": "node scripts/wrangler.mjs staging api d1 execute DB --remote --file=seeds/username-policies.sql",
+    "db:policies:production": "node scripts/wrangler.mjs production api d1 execute DB --remote --file=seeds/username-policies.sql",
+    "deploy:staging": "pnpm run check && pnpm run db:migrate:staging && pnpm run db:policies:staging && node scripts/wrangler.mjs staging api deploy && pnpm run media:upload && node scripts/wrangler.mjs staging web deploy",
+    "deploy:production": "pnpm run check && pnpm run db:migrate:production && pnpm run db:policies:production && node scripts/wrangler.mjs production api deploy && pnpm run media:upload && node scripts/wrangler.mjs production web deploy"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

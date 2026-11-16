@@ -4,16 +4,24 @@ version: '3'
 
 tasks:
   install:
-    desc: Install dependencies (pnpm through corepack, the version in package.json)
+    desc: Install dependencies (pnpm switches itself to the version in package.json)
     cmds: [pnpm install]
 
   dev:
     desc: Run both Workers locally (api :8080, web :8081; the API binding connects them)
     cmds: [pnpm run dev]
 
+  dev:lan:
+    desc: Run both Workers on 0.0.0.0 (:8080, :8081) for devices on the same LAN
+    cmds: [pnpm run dev:lan]
+
   test:
     desc: Run every test in the Workers runtime
     cmds: [pnpm run test]
+
+  test:changed:
+    desc: Run the tests whose imports changed since HEAD (a loop while working; `check` is the gate)
+    cmds: [pnpm run test:changed]
 
   typecheck:
     desc: Check generated binding types are current, then type-check both Workers
@@ -36,5 +44,41 @@ tasks:
     cmds: [pnpm run check]
 
   db:reset:
-    desc: Recreate the local D1 database from the migrations
+    desc: Recreate the local D1 database from the migrations, then the seeds
     cmds: [pnpm run db:reset]
+
+  db:policies:staging:
+    desc: Upsert the username policies (apps/api/seeds) into staging's D1; deploy runs it too
+    cmds: [pnpm run db:policies:staging]
+
+  db:policies:production:
+    desc: Upsert the username policies (apps/api/seeds) into production's D1; deploy runs it too
+    cmds: [pnpm run db:policies:production]
+
+  db:migrate:staging:
+    desc: Apply the D1 migrations to staging's database (`carodo-staging`)
+    cmds: [pnpm run db:migrate:staging]
+
+  db:migrate:production:
+    desc: Apply the D1 migrations to production's database (`carodo`)
+    cmds: [pnpm run db:migrate:production]
+
+  deploy:staging:
+    desc: check, migrate staging's D1 and upsert its policies, then deploy the api and the web to staging
+    cmds: [pnpm run deploy:staging]
+
+  deploy:production:
+    desc: check, migrate production's D1 and upsert its policies, then deploy the api and the web to production
+    cmds: [pnpm run deploy:production]
+
+  media:upload:
+    desc: Put the site's videos (apps/web/media/*.mp4) in the public R2 bucket carodo-media (media.carodo.app); every deploy runs it
+    cmds: [pnpm run media:upload]
+
+  wrangler:staging:
+    desc: 'Any Wrangler command against staging, e.g. `task wrangler:staging -- api secret put SECRET_KEY`'
+    cmds: ['pnpm run wrangler:staging {{.CLI_ARGS}}']
+
+  wrangler:production:
+    desc: 'Any Wrangler command against production, e.g. `task wrangler:production -- api secret put SECRET_KEY`'
+    cmds: ['pnpm run wrangler:production {{.CLI_ARGS}}']
