@@ -1,0 +1,24 @@
+/* The Carodo preset of shadcn Typeset, as linkto's `.typeset-docs`; upstream stays in typeset.css. */
+@layer components {
+  .typeset-carodo {
+    --typeset-size: 16px; /* SF runs smaller than linkto's Geist at 15px */
+    --typeset-leading: 1.75;
+    --typeset-flow: 1.25em;
+    max-width: 48rem;
+
+    /* Links and email addresses take the accent, as the selected tab of the iOS bottom bar
+       (CarodoSurface.accent); Typeset draws the underline from it. */
+    & :where(a) {
+      color: var(--color-primary);
+    }
+
+    & h2 {
+      font-size: 1.5em;
+      line-height: 1.35;
+      margin-top: 2.25em;
+      margin-bottom: 0.75em;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 0.5rem;
+    }
+  }
+}

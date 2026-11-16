@@ -1,22 +1,48 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // carodo-web: the public share page, HTML rendered on the server with no client script.
+  // carodo-web: the public web and share pages, HTML rendered on the server with no client script.
   // It owns no data store: everything it shows comes from the api's `WebRpc` through the `API`
   // service binding, never from the api's public URL (docs/decisions/0001).
-  // This top level is local development; environments come with the first deploy.
-  "name": "carodo-web",
+  //
+  // Three environments on one Cloudflare account (ADR 0004): this top level is local, `staging` and
+  // `production` are below. The top level is named `-local`, so a deploy that forgets `--env` cannot
+  // replace a real Worker; each environment's `API` binding names the api Worker of the same
+  // environment. The account comes from `.env.deploy` through scripts/wrangler.mjs
+  // (docs/operations/deploy.md).
+  "name": "carodo-web-local",
   "main": "./src/index.tsx",
   "compatibility_date": "2026-11-03",
   "compatibility_flags": ["nodejs_compat"],
   "upload_source_maps": true,
   "workers_dev": false,
   "preview_urls": false,
-  // A share link's token is in the URL, and invocation logs record the URL: they stay off.
-  // Our own structured log lines stay, and never carry a token.
+  // A share link's token is in the URL. Invocation logs and traces stay off because provider
+  // traces can capture request URLs and location/device metadata. Our own structured log lines stay
+  // and never carry a token.
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
-    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+    "traces": { "enabled": false }
   },
-  "services": [{ "binding": "API", "service": "carodo-api", "entrypoint": "WebRpc" }]
+  "services": [{ "binding": "API", "service": "carodo-api-local", "entrypoint": "WebRpc" }],
+
+  "env": {
+    // stg.carodo.app, bound to carodo-api-staging on the same Cloudflare account (ADR 0004).
+    "staging": {
+      "name": "carodo-web-staging",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "stg.carodo.app", "custom_domain": true }],
+      "services": [{ "binding": "API", "service": "carodo-api-staging", "entrypoint": "WebRpc" }]
+    },
+
+    // carodo.app, bound to carodo-api on the same Cloudflare account (ADR 0004).
+    "production": {
+      "name": "carodo-web",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "carodo.app", "custom_domain": true }],
+      "services": [{ "binding": "API", "service": "carodo-api", "entrypoint": "WebRpc" }]
+    }
+  }
 }

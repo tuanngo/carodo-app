@@ -1,0 +1,106 @@
+/* Tailwind with Preflight, the Carodo tokens and shadcn Typeset, as in a shadcn app. */
+@import "tailwindcss" source(none);
+@import "./tokens.css";
+@import "./typeset.css";
+@import "./typography.css";
+@source "../**/*.tsx";
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+  :focus-visible {
+    @apply outline-3 outline-offset-4 outline-primary;
+  }
+}
+
+/* The public wash: linkto's veil and glow, drawn behind the top of the page under the header. */
+@layer utilities {
+  .bg-public-wash {
+    background-image:
+      linear-gradient(180deg, color-mix(in oklch, var(--color-wash-veil) 55%, transparent) 0%, transparent 60%),
+      radial-gradient(
+        ellipse 100% 70% at 50% -20%,
+        color-mix(in oklch, var(--color-wash-glow) 40%, transparent),
+        transparent 62%
+      );
+  }
+}
+
+/* Cards and screens rise into place as they scroll into view; without scroll-driven animations, or
+   with Reduce Motion, they are simply there. */
+@layer utilities {
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .landing-rise {
+        animation: landing-rise linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 60%;
+      }
+    }
+  }
+  @keyframes landing-rise {
+    from {
+      opacity: 0;
+      translate: 0 2rem;
+    }
+  }
+}
+
+/* Small motions in the feature cards' strips and the hero: none with Reduce Motion, where the
+   strips rest drawn and played to their middle. */
+@layer utilities {
+  .mock-play {
+    clip-path: inset(0 45% 0 0);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .mock-spin {
+      transform-origin: 10px 10px;
+      animation: mock-spin 6s linear infinite;
+    }
+    .mock-draw {
+      stroke-dasharray: 1 1;
+      animation: mock-draw 4.5s ease-in-out infinite;
+    }
+    .mock-play {
+      animation: mock-play 6s linear infinite;
+    }
+    .hero-float {
+      animation: hero-float 7s ease-in-out infinite;
+    }
+  }
+  @keyframes mock-spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+  @keyframes mock-draw {
+    0% {
+      stroke-dashoffset: 1;
+    }
+    55%,
+    85% {
+      stroke-dashoffset: 0;
+    }
+    100% {
+      stroke-dashoffset: -1;
+    }
+  }
+  @keyframes mock-play {
+    from {
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
+    }
+  }
+  @keyframes hero-float {
+    50% {
+      translate: 0 -8px;
+    }
+  }
+}

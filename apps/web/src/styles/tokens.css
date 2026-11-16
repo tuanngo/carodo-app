@@ -1,0 +1,86 @@
+/*
+ * Carodo web tokens: the web's own palette, kept close to the iOS one (carodo-ios `CarodoColor`
+ * and `CarodoSurface`) but tuned for long reading on a screen, as linkto's: a lighter page and
+ * near-black text (owner, 2026-11-15). Brand colours (Charcoal, Copper, Ivory) stay iOS's exact values.
+ *
+ * Light is the theme's default; Dark (prefers-color-scheme) and Increase Contrast (prefers-contrast)
+ * override in the base layer, as `adaptive(dark:light:highDark:highLight:)` does on iOS. Names are
+ * Tailwind's (`bg-background`, `text-muted-foreground`, `text-primary`), which shadcn Typeset reads.
+ */
+@theme static {
+  /* Brand (CarodoColor), the same in both appearances. */
+  --color-charcoal: #242321;
+  --color-copper: #bd8053;
+  --color-copper-deep: #a86f47;
+  --color-ivory: #f3eee5;
+
+  /* Surfaces and text (CarodoSurface), Light. A page of reading sits on `elevated` (as linkto's
+     linen-50), lighter than the app's Ivory page; Ivory becomes the quiet fill and the wash. */
+  --color-background: #faf7f1; /* elevated */
+  --color-foreground: #141311; /* Charcoal's hue, darker: ≈ 18:1 on the page (Charcoal: 14.7) */
+  --color-muted: #f3eee5; /* background (Ivory) */
+  --color-card: #fffcf7;
+  --color-border: #ded6c9; /* stroke */
+  --color-muted-foreground: #6a6660; /* textSecondary, 4.9:1 on the page */
+  /* accent: Copper for links, labels and focus. iOS's accent (#965e36) at more chroma (0.09 → 0.12,
+     same hue and lightness): on the web it read dull beside body text. 5.4:1 on the page. */
+  --color-primary: #9c5313;
+  --color-ring: #9c5313;
+
+  /* A solid Copper fill carries Charcoal, never white (Start Drive). */
+  --color-brand: #bd8053;
+  --color-brand-foreground: #242321;
+
+  /* The warm veil across the top of a public page (linkto's public wash), in Copper's hue. */
+  --color-wash-veil: #ebe1d3;
+  --color-wash-glow: #e9cfb8;
+
+  /* The system face: SF on Apple, Segoe UI on Windows, Roboto on Android. No web font to load. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-heading: var(--font-sans);
+
+  --radius: 0.75rem;
+
+  /* A surface resting on the page, borderless (linkto's shadow-soft): a hairline of shade and a
+     long, faint lift, warm (Charcoal's hue), never a grey box shadow. */
+  --shadow-soft: 0 1px 2px 0 rgb(36 35 33 / 0.05), 0 12px 32px -16px rgb(36 35 33 / 0.22);
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-background: #242321;
+      --color-foreground: #faf7f1;
+      --color-muted: #2e2c29;
+      --color-card: #373430;
+      --color-wash-veil: #2e2c29;
+      --color-wash-glow: #4a3a2d;
+      --color-border: #4e4a44;
+      --color-muted-foreground: #a49e95;
+      --shadow-soft: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 14px 36px -16px rgb(0 0 0 / 0.65);
+      --color-primary: #dc9154; /* 6.2:1 */
+      --color-ring: #dc9154;
+    }
+  }
+
+  @media (prefers-contrast: more) {
+    :root {
+      --color-border: #867e72;
+      --color-muted-foreground: #4e4b46;
+      --color-primary: #7a4a28;
+      --color-ring: #7a4a28;
+    }
+  }
+  @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+    :root {
+      --color-border: #807a71;
+      --color-muted-foreground: #ccc6bd;
+      --color-primary: #e4b086;
+      --color-ring: #e4b086;
+    }
+  }
+}

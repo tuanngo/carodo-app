@@ -2,7 +2,7 @@ import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
 /**
- * A stand-in `carodo-api` behind the same service binding: the web's tests check its pages and
+ * A stand-in `carodo-api-local` behind the same service binding: the web's tests check its pages and
  * the binding's wiring, while the api's own tests check what `WebRpc` answers.
  */
 const fakeApi = `
@@ -18,7 +18,7 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
-        workers: [{ name: "carodo-api", modules: true, script: fakeApi, compatibilityDate: "2026-11-03" }],
+        workers: [{ name: "carodo-api-local", modules: true, script: fakeApi, compatibilityDate: "2026-11-03" }],
       },
     }),
   ],
