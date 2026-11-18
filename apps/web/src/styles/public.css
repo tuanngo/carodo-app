@@ -29,6 +29,15 @@
         transparent 62%
       );
   }
+
+  /* Soft centred glow behind the closing CTA — same wash tokens as the hero, bookending the page. */
+  .bg-cta-wash {
+    background-image: radial-gradient(
+      ellipse 72% 58% at 50% 42%,
+      color-mix(in oklch, var(--color-wash-glow) 55%, transparent),
+      transparent 72%
+    );
+  }
 }
 
 /* Cards and screens rise into place as they scroll into view; without scroll-driven animations, or

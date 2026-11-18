@@ -1,6 +1,10 @@
 import { siteMedia, siteVideos } from "../.generated/media";
+import { CarodoMark } from "../brand";
 import { AppStoreBadge } from "../components/site/app-store-badge";
 import { landingCopy, type SiteLanguage } from "../landing-i18n";
+
+/** Editorial loop grid: fixed left gutter for the beat label, title and copy share the right column. */
+const LOOP_GRID = "grid gap-3 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-x-10 sm:gap-y-0";
 
 type Alt = "autoAlt" | "journalAlt" | "replayAlt";
 
@@ -116,17 +120,19 @@ export function LandingLoop({ lang }: { lang: SiteLanguage }) {
   return (
     <section class="bg-muted/45 py-16 sm:py-24" aria-labelledby="loop-title">
       <div class="mx-auto max-w-3xl px-4 sm:px-6">
-        <h2
-          id="loop-title"
-          class="max-w-2xl text-3xl font-bold tracking-tight text-balance sm:text-4xl"
-          data-i18n="loopHeading"
-        >
-          {t.loopHeading}
-        </h2>
+        <div class={LOOP_GRID}>
+          <h2
+            id="loop-title"
+            class="max-w-2xl text-3xl font-bold tracking-tight text-balance sm:col-start-2 sm:text-4xl"
+            data-i18n="loopHeading"
+          >
+            {t.loopHeading}
+          </h2>
+        </div>
         <ol class="mt-10 divide-y divide-border">
           {BEATS.map(({ label, title, body }, index) => (
-            <li class="landing-rise grid gap-3 py-8 first:pt-0 last:pb-0 sm:grid-cols-[auto_1fr] sm:gap-10">
-              <p class="whitespace-nowrap text-sm font-semibold text-primary">
+            <li class={`landing-rise ${LOOP_GRID} py-8 first:pt-0 last:pb-0`}>
+              <p class="whitespace-nowrap text-sm font-semibold text-primary sm:pt-1.5">
                 <span class="mr-2 tabular-nums text-muted-foreground" aria-hidden="true">
                   {String(index + 1).padStart(2, "0")}
                 </span>
@@ -260,24 +266,30 @@ export function LandingFaq({ lang }: { lang: SiteLanguage }) {
   );
 }
 
-/** Closing invite: the same honest “coming soon” as the hero. */
+/** Closing invite: the same honest “coming soon” as the hero, with a soft wash behind it. */
 export function LandingCta({ lang }: { lang: SiteLanguage }) {
   const t = landingCopy[lang];
   return (
     <section class="border-t border-border/60" aria-labelledby="cta-title">
-      <div class="mx-auto flex max-w-3xl flex-col items-center px-4 py-14 text-center sm:px-6 sm:py-20">
-        <h2
-          id="cta-title"
-          class="max-w-xl text-3xl font-bold tracking-tight text-balance sm:text-4xl"
-          data-i18n="ctaHeading"
-        >
-          {t.ctaHeading}
-        </h2>
-        <p class="mt-4 text-lg text-pretty text-muted-foreground" data-i18n="ctaBody">
-          {t.ctaBody}
-        </p>
-        <div class="mt-8">
-          <AppStoreBadge lang={lang} size="lg" />
+      <div class="relative overflow-hidden">
+        <div aria-hidden="true" class="pointer-events-none absolute inset-0 bg-cta-wash" />
+        <div class="relative mx-auto flex max-w-3xl flex-col items-center px-4 py-16 text-center sm:px-6 sm:py-24">
+          <div class="grid size-14 place-items-center rounded-[1.1rem] bg-ivory text-charcoal shadow-soft ring-1 ring-charcoal/5 sm:size-16 sm:rounded-[1.25rem] dark:bg-charcoal dark:text-ivory dark:ring-ivory/10">
+            <CarodoMark size={36} class="sm:size-11" />
+          </div>
+          <h2
+            id="cta-title"
+            class="mt-8 max-w-xl text-3xl font-bold tracking-tight text-balance sm:text-4xl"
+            data-i18n="ctaHeading"
+          >
+            {t.ctaHeading}
+          </h2>
+          <p class="mt-4 text-lg text-pretty text-muted-foreground" data-i18n="ctaBody">
+            {t.ctaBody}
+          </p>
+          <div class="mt-8">
+            <AppStoreBadge lang={lang} size="lg" />
+          </div>
         </div>
       </div>
     </section>
