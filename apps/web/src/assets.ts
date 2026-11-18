@@ -4,8 +4,7 @@ import { type SiteImage, siteMedia } from "./.generated/media";
  * Static brand assets served inline by the Worker. No R2, no KV, no extra binding (P6).
  *
  * The SVG favicon is plain text here. The PNG icons and the Open Graph card are files in `media/`,
- * served from memory like the landing's screens (scripts/build-media.mjs). All originals live in
- * the brand handbook (`carodo-handbook/design/brand/export/web/`).
+ * served from memory like the landing's screens (scripts/build-media.mjs).
  */
 
 /** An image from `media/`; a missing one fails when the Worker loads, not on a request. */
@@ -16,7 +15,7 @@ export function siteImage(key: string): SiteImage {
 }
 
 // ---------------------------------------------------------------------------
-// Favicon SVG — adapts to light/dark via prefers-color-scheme
+// Favicon SVG: adapts to light/dark via prefers-color-scheme
 // ---------------------------------------------------------------------------
 
 export const FAVICON_SVG =

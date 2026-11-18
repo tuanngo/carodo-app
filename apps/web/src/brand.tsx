@@ -1,11 +1,6 @@
 /**
- * Brand SVGs from `carodo-handbook/design/brand/svg/`, inlined as JSX.
- *
- * The neutral paths use `currentColor` so they follow the page's text colour, adapting to
- * light/dark mode without a media query on the SVG itself. Copper details keep the brand colour in both modes.
- *
- * These are the **source-of-truth SVGs** exported by `source/export.swift`; do not hand-edit the
- * paths — regenerate from the handbook when the mark changes.
+ * Brand SVGs inlined as JSX. Neutral paths use `currentColor` for light/dark; Copper details keep
+ * the brand colour. Do not hand-edit the paths: regenerate from the brand export when the mark changes.
  */
 
 /* --------------------------------- Mark (wheel) --------------------------------- */

@@ -27,9 +27,9 @@ export function listVideos() {
 
 /**
  * The site's images (media/*.jpg: app screens of the synthetic showcase drives; media/*.png: the
- * brand's icons and Open Graph card, copied from the handbook's brand export) as a module the
- * Worker serves from memory: no R2, no Assets binding (P6). Each file's URL carries a hash of its
- * bytes, so it can be cached for good. Trusted build input only.
+ * brand's icons and Open Graph card) as a module the Worker serves from memory: no R2, no Assets
+ * binding (P6). Each file's URL carries a hash of its bytes, so it can be cached for good. Trusted
+ * build input only.
  */
 export function buildMedia() {
   const root = fileURLToPath(new URL("../", import.meta.url));

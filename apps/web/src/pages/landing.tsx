@@ -2,12 +2,9 @@ import { CarodoMark } from "../brand";
 import { AppStoreBadge } from "../components/site/app-store-badge";
 import { landingCopy, type SiteLanguage } from "../landing-i18n";
 import { Layout } from "../layout";
-import { LandingFaq, LandingFeatures, LandingPoints, LandingScreens } from "./landing-blocks";
+import { LandingCta, LandingFaq, LandingLoop, LandingPrivacy, LandingScreens } from "./landing-blocks";
 
-/**
- * One short page, after Geofency: the app icon, what Carodo is, the App Store and three of the app's
- * screens; then three features, privacy said once, and a few questions.
- */
+/** Landing: hero, product loop (Auto Mode → Journeys → Replay), privacy, FAQ, closing CTA. No Feed. */
 export function LandingPage({ lang = "en", url }: { lang?: SiteLanguage; url?: string }) {
   const t = landingCopy[lang];
   return (
@@ -24,13 +21,9 @@ export function LandingPage({ lang = "en", url }: { lang?: SiteLanguage; url?: s
             </div>
           </div>
 
-          <p class="mt-8 rounded-full bg-primary/10 px-3.5 py-1 text-sm font-medium text-primary" data-i18n="badge">
-            {t.badge}
-          </p>
-
           <h1
             id="landing-title"
-            class="mt-5 max-w-4xl text-4xl leading-[1.08] font-bold tracking-tight text-balance sm:text-6xl"
+            class="mt-8 max-w-4xl text-4xl leading-[1.08] font-bold tracking-tight text-balance sm:text-6xl"
           >
             <span class="block" data-i18n="headline">
               {t.headline}
@@ -55,9 +48,10 @@ export function LandingPage({ lang = "en", url }: { lang?: SiteLanguage; url?: s
           <LandingScreens lang={lang} />
         </section>
 
-        <LandingFeatures lang={lang} />
-        <LandingPoints lang={lang} />
+        <LandingLoop lang={lang} />
+        <LandingPrivacy lang={lang} />
         <LandingFaq lang={lang} />
+        <LandingCta lang={lang} />
       </main>
     </Layout>
   );

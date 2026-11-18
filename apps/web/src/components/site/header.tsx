@@ -2,7 +2,7 @@ import { CarodoLockup } from "../../brand";
 import { landingCopy, type SiteLanguage } from "../../landing-i18n";
 import { AppStoreBadge } from "./app-store-badge";
 
-/** The ghost control shared by the language switch and the way home (linkto's `ghost`/`sm` button). */
+/** Quiet control shared by the language switch and the way home. */
 const quietControl =
   "relative inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-foreground transition-colors hover:bg-muted before:absolute before:-inset-x-0.5 before:-inset-y-1.5";
 

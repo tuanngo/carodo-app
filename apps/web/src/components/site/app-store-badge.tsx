@@ -1,20 +1,24 @@
 import { landingCopy, type SiteLanguage } from "../../landing-i18n";
 
+/** Stable download shortlink; retarget the destination without a web deploy. */
+export const APP_DOWNLOAD_URL = "https://linkto.so/carodo";
+
 /**
- * The App Store badge, not a link until Carodo is on the store ("Coming soon"). `lg` is the hero's,
- * `sm` the header's. Black on Light and Ivory on Dark, as Apple's own badge.
+ * The App Store badge. Links to the shortlink; the landing still says "Coming soon" until the store
+ * listing is live. `lg` is the hero's, `sm` the header's.
  */
 export function AppStoreBadge({ lang, size = "sm" }: { lang: SiteLanguage; size?: "sm" | "lg" }) {
   const t = landingCopy[lang];
   const lg = size === "lg";
   return (
-    <span
-      class={`inline-flex items-center bg-foreground leading-tight text-background ${
+    <a
+      href={APP_DOWNLOAD_URL}
+      class={`inline-flex items-center bg-foreground leading-tight text-background transition-opacity hover:opacity-90 ${
         lg ? "min-h-13 gap-2.5 rounded-xl px-4 py-1.5" : "min-h-8 gap-1.5 rounded-lg px-2 py-0.5"
       }`}
-      role="img"
       aria-label={t.appStoreLabel}
       data-i18n-aria="appStoreLabel"
+      rel="noopener noreferrer"
     >
       <svg viewBox="0 0 24 28" width={lg ? 24 : 18} height={lg ? 28 : 21} aria-hidden="true">
         <path
@@ -28,6 +32,6 @@ export function AppStoreBadge({ lang, size = "sm" }: { lang: SiteLanguage; size?
         </small>
         <strong class={`font-semibold tracking-tight ${lg ? "text-lg" : "text-sm"}`}>App Store</strong>
       </span>
-    </span>
+    </a>
   );
 }

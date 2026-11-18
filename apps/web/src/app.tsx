@@ -25,7 +25,7 @@ function pageLanguage(c: Context<{ Bindings: WebEnv }>): SiteLanguage {
 }
 
 // ---------------------------------------------------------------------------
-// Static brand assets — inline, no R2 or Assets binding (P6)
+// Static brand assets: inline, no R2 or Assets binding (P6)
 // ---------------------------------------------------------------------------
 
 app.get("/favicon.svg", (c) => {
@@ -82,7 +82,7 @@ app.notFound((c) => {
   const t = notFoundCopy[lang];
   return c.html(
     html`<!doctype html>${(
-      <Layout title={t.title} lang={lang}>
+      <Layout title={t.title} lang={lang} noindex>
         <main class="mx-auto max-w-5xl px-4 py-16 text-center sm:px-6">
           <h1 class="mb-2 text-2xl font-semibold tracking-tight">{t.heading}</h1>
           <p class="text-muted-foreground">{t.body}</p>

@@ -1,7 +1,7 @@
 /*
- * Carodo web tokens: the web's own palette, kept close to the iOS one (carodo-ios `CarodoColor`
- * and `CarodoSurface`) but tuned for long reading on a screen, as linkto's: a lighter page and
- * near-black text (owner, 2026-11-15). Brand colours (Charcoal, Copper, Ivory) stay iOS's exact values.
+ * Carodo web tokens: close to the iOS palette (carodo-ios `CarodoColor` and `CarodoSurface`) but
+ * tuned for long reading on a screen — a lighter page and near-black text. Brand colours (Charcoal,
+ * Copper, Ivory) stay iOS's exact values.
  *
  * Light is the theme's default; Dark (prefers-color-scheme) and Increase Contrast (prefers-contrast)
  * override in the base layer, as `adaptive(dark:light:highDark:highLight:)` does on iOS. Names are
@@ -14,8 +14,8 @@
   --color-copper-deep: #a86f47;
   --color-ivory: #f3eee5;
 
-  /* Surfaces and text (CarodoSurface), Light. A page of reading sits on `elevated` (as linkto's
-     linen-50), lighter than the app's Ivory page; Ivory becomes the quiet fill and the wash. */
+  /* Surfaces and text (CarodoSurface), Light. A page of reading sits on `elevated`, lighter than
+     the app's Ivory page; Ivory becomes the quiet fill and the wash. */
   --color-background: #faf7f1; /* elevated */
   --color-foreground: #141311; /* Charcoal's hue, darker: ≈ 18:1 on the page (Charcoal: 14.7) */
   --color-muted: #f3eee5; /* background (Ivory) */
@@ -31,7 +31,7 @@
   --color-brand: #bd8053;
   --color-brand-foreground: #242321;
 
-  /* The warm veil across the top of a public page (linkto's public wash), in Copper's hue. */
+  /* The warm veil across the top of a public page, in Copper's hue. */
   --color-wash-veil: #ebe1d3;
   --color-wash-glow: #e9cfb8;
 
@@ -41,8 +41,8 @@
 
   --radius: 0.75rem;
 
-  /* A surface resting on the page, borderless (linkto's shadow-soft): a hairline of shade and a
-     long, faint lift, warm (Charcoal's hue), never a grey box shadow. */
+  /* A surface resting on the page, borderless: a hairline of shade and a long, faint lift, warm
+     (Charcoal's hue), never a grey box shadow. */
   --shadow-soft: 0 1px 2px 0 rgb(36 35 33 / 0.05), 0 12px 32px -16px rgb(36 35 33 / 0.22);
 }
 

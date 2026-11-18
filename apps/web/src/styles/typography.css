@@ -1,7 +1,7 @@
-/* The Carodo preset of shadcn Typeset, as linkto's `.typeset-docs`; upstream stays in typeset.css. */
+/* The Carodo preset of shadcn Typeset; upstream stays in typeset.css. */
 @layer components {
   .typeset-carodo {
-    --typeset-size: 16px; /* SF runs smaller than linkto's Geist at 15px */
+    --typeset-size: 16px;
     --typeset-leading: 1.75;
     --typeset-flow: 1.25em;
     max-width: 48rem;

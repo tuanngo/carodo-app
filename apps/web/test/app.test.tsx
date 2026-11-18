@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { siteMedia, siteVideos } from "../src/.generated/media";
+import { APP_DOWNLOAD_URL } from "../src/components/site/app-store-badge";
 import { FALLBACK_LANGUAGE, landingCopy, readerLanguage, resolveRequestLanguage } from "../src/landing-i18n";
 import { privacyDocument } from "../src/pages/privacy-content";
 import { termsDocument } from "../src/pages/terms-content";
@@ -36,6 +37,7 @@ describe("web", () => {
     const html = await response.text();
     expect(html).toContain('<html lang="en">');
     expect(html).toContain("Page not found");
+    expect(html).toContain('<meta name="robots" content="noindex"/>');
     expect(html).not.toContain("<script");
 
     const viResponse = await exports.default.fetch("https://carodo.test/t/unknown", {
@@ -63,7 +65,12 @@ describe("web", () => {
     expect(html).toContain('<html lang="en">');
     expect(html).toContain(`<title>${landingCopy.en.title}</title>`);
     expect(html).toContain("Your private driving journal.");
+    expect(html).toContain("Drive. Keep it. Relive it.");
+    expect(html).toContain("Link your car. Drive. It’s recorded.");
+    expect(html).toContain("Start with the next drive.");
     expect(html).toContain('id="landing-title"');
+    expect(html).toContain('id="loop-title"');
+    expect(html).toContain(`href="${APP_DOWNLOAD_URL}"`);
     expect(html).toContain('<span id="landing-language-label">EN</span>');
     expect(html).toContain('aria-label="Switch to Vietnamese"');
     expect(html).toContain('id="landing-language"');
@@ -71,6 +78,13 @@ describe("web", () => {
     expect(html).toContain("Nhật ký lái xe của riêng bạn.");
     expect(html).toContain("Your private driving journal on iPhone");
     expect(html).toContain("<script");
+    // Page analytics (`SITE_ID`) is production-only; local/test omit the beacon.
+    expect(html).not.toContain("t.linkto.so");
+    expect(html).not.toContain("data-site=");
+    // Feed is a later product surface; not marketed on the landing.
+    expect(html).not.toContain("Share on the Feed");
+    expect(html).not.toContain("Chia sẻ trên Feed");
+    expect(html).not.toContain('data-i18n="feedTitle"');
   });
 
   it("renders Vietnamese when requested by Accept-Language or cookie, and cookie wins", async () => {
@@ -142,16 +156,27 @@ describe("web", () => {
     expect(html).toContain('<html lang="en">');
     expect(html).toContain("Privacy Policy");
     expect(html).toContain("support@carodo.app");
-    expect(html).toContain("We run no server that receives your routes or your location history.");
-    expect(html).toContain("Chúng tôi không vận hành máy chủ nào nhận lộ trình hoặc lịch sử vị trí của bạn.");
-    expect(html).toContain("Nhật ký chỉ được gửi đi khi bạn chủ động chia sẻ.");
+    expect(html).toContain("Share cards and Privacy Zone");
+    expect(html).toContain("Ảnh thẻ chia sẻ và Vùng riêng tư");
+    expect(html).toContain("How your data is stored");
+    expect(html).toContain("Third-party services");
+    expect(html).toContain("Data retention and deletion");
+    expect(html).toContain("Your drives live on your iPhone");
+    expect(html).toContain("Chuyến đi nằm trên iPhone");
+    expect(html).toContain("The Feed is optional");
+    expect(html).toContain("Privacy Zone.");
+    expect(html).toContain("Vùng riêng tư.");
+    expect(html).toContain("<strong");
+    expect(html).toContain("It is 300 m by default; you can change it in Settings.");
     // Not in the app: the policy never describes them.
     for (const absent of ["share link", "liên kết chia sẻ", "Live status", "Show my area"]) {
       expect(html).not.toContain(absent);
     }
+    expect(html).not.toContain("We run no server that receives your routes");
+    expect(html).not.toContain("không vận hành máy chủ nào nhận lộ trình");
     expect(html).toContain('id="landing-language"');
-    expect(html).toContain("Privacy Policy — Carodo");
-    expect(html).toContain("Chính sách quyền riêng tư — Carodo");
+    expect(html).toContain("Privacy Policy · Carodo");
+    expect(html).toContain("Chính sách quyền riêng tư · Carodo");
   });
 
   it("serves the terms of service", async () => {
@@ -163,12 +188,17 @@ describe("web", () => {
     expect(html).toContain("support@carodo.app");
     expect(html).toContain("Drive safely");
     expect(html).toContain("Lái xe an toàn");
-    expect(html).toContain("Feed và quy tắc cộng đồng");
+    expect(html).toContain("The Feed (optional)");
+    expect(html).toContain("Feed (tuỳ chọn)");
+    expect(html).toContain("Yours on the device.");
     expect(html).toContain('href="/privacy"');
+    expect(html).toContain("<strong");
+    expect(html).not.toContain("We hold no copy");
+    expect(html).not.toContain("không giữ bản sao");
     expect(html).not.toContain("legal-review");
     expect(html).toContain('id="landing-language"');
-    expect(html).toContain("Terms of Use — Carodo");
-    expect(html).toContain("Điều khoản sử dụng — Carodo");
+    expect(html).toContain("Terms of Use · Carodo");
+    expect(html).toContain("Điều khoản sử dụng · Carodo");
   });
 
   it.each([
@@ -264,11 +294,16 @@ describe("web", () => {
   it("gives every page a link preview with an absolute image the Worker serves", async () => {
     for (const path of ["/", "/privacy", "/terms"]) {
       const html = await (await exports.default.fetch(`https://carodo.test${path}?ref=x`)).text();
+      expect(html).toContain(`<link rel="canonical" href="https://carodo.test${path}"/>`);
       expect(html).toContain(`<meta property="og:url" content="https://carodo.test${path}"/>`);
       expect(html).toContain('<meta name="twitter:card" content="summary_large_image"/>');
       const title = html.match(/<title>([^<]+)<\/title>/)?.[1];
       expect(html).toContain(`<meta property="og:title" content="${title}"/>`);
+      expect(html).toContain(`<meta name="twitter:title" content="${title}"/>`);
       expect(html).toContain('<meta property="og:description"');
+      expect(html).toContain('<meta name="twitter:description"');
+      expect(html).toContain('<meta property="og:locale" content="en_US"/>');
+      expect(html).toContain('<meta property="og:locale:alternate" content="vi_VN"/>');
       const image = html.match(/<meta property="og:image" content="([^"]+)"/)?.[1] ?? "";
       expect(image).toMatch(/^https:\/\/carodo\.test\/media\/og-image\.[0-9a-f]{10}\.png$/);
       expect(html).toContain('<meta property="og:image:width" content="1200"/>');
@@ -279,8 +314,10 @@ describe("web", () => {
     }
     const vi = await (await exports.default.fetch("https://carodo.test/", { headers: { Cookie: "lng=vi" } })).text();
     expect(vi).toContain('<meta property="og:locale" content="vi_VN"/>');
+    expect(vi).toContain('<meta property="og:locale:alternate" content="en_US"/>');
     const missing = await (await exports.default.fetch("https://carodo.test/nonexistent")).text();
     expect(missing).not.toContain("og:image");
+    expect(missing).toContain('<meta name="robots" content="noindex"/>');
   });
 
   it("serves the icons the head and the manifest name", async () => {

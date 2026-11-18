@@ -3,8 +3,9 @@
 The public website: the landing page, Privacy and Terms today, and later the share page of a trip
 someone shared (privacy-trimmed on the device). Keep it a small public site, never a dashboard.
 
-- HTML rendered on the server with Hono JSX (ADR 0001); the only browser script is the language
-  switch. Every page shares the site header, footer, palette and the platform's own font.
+- HTML rendered on the server with Hono JSX (ADR 0001). Browser scripts: the language switch, and on
+  production only the cookieless page-analytics beacon (`SITE_ID` in `wrangler.jsonc`).
+  Every page shares the site header, footer, palette and the platform's own font.
 - No store of its own: everything comes from the api's `WebRpc` through the `API` service binding,
   typed by `@carodo/api/web-contract`. `src/env.ts` declares the bindings by hand; keep it in step
   with `wrangler.jsonc`.
@@ -14,11 +15,10 @@ someone shared (privacy-trimmed on the device). Keep it a small public site, nev
 
 ## Pages
 
-- **Landing** (`pages/landing.tsx`, `landing-blocks.tsx`): the hero, three features in the order a
-  drive lives ("Record it. Keep it. Relive it.": Auto Mode, Journeys, Replay), three promises and
-  a short FAQ whose Auto Mode answers are the app's own Help text (`Help.xcstrings`). Carodo is a
-  private journal, so no sharing feature is shown. The App Store badge says "Coming soon" and links
-  nowhere until a listing exists (iOS `Configuration.appStoreID` is nil).
+- **Landing** (`pages/landing.tsx`, `landing-blocks.tsx`): the hero, the product loop (Auto Mode →
+  Journeys → Replay), privacy once, a short FAQ and a closing CTA. No Feed on the landing. The App
+  Store badge still says "Coming soon" and links to the stable shortlink `https://linkto.so/carodo`
+  (retarget there when TestFlight or the App Store listing is ready; no web redeploy).
 - **Privacy and Terms** (`pages/legal-page.tsx`, `privacy-content.ts`, `terms-content.ts`): the
   privacy policy states what the iOS app stores and what leaves the iPhone (carodo-ios
   `docs/privacy.md`) and describes only what exists; the Terms sit on top of Apple's standard EULA
@@ -47,10 +47,10 @@ Every image is of the synthetic showcase drives (`-carodo.showcaseJournal`, on a
 Max Simulator), never a real drive; each screen has a Dark twin `<name>-dark.*` (shot with
 `-carodo.appearance dark`) chosen by `prefers-color-scheme`.
 
-- **Images** (`media/*.jpg`, 440 px; `media/*.png`, the brand's Open Graph card and icons from the
-  handbook's export): `scripts/build-media.mjs` embeds them in `src/.generated/media.ts`; the
-  Worker serves them at `/media/<name>.<hash>.<ext>`, immutable for a year. No R2 and no Assets
-  binding. `/apple-touch-icon.png` keeps its fixed name; the manifest names the hashed paths.
+- **Images** (`media/*.jpg`, 440 px; `media/*.png`, the brand's Open Graph card and icons):
+  `scripts/build-media.mjs` embeds them in `src/.generated/media.ts`; the Worker serves them at
+  `/media/<name>.<hash>.<ext>`, immutable for a year. No R2 and no Assets binding.
+  `/apple-touch-icon.png` keeps its fixed name; the manifest names the hashed paths.
 - **The Replay clip** (`media/replay-clip.mp4` and `-dark.mp4`, 7 s, H.264 720 × 1280, ~535 KB)
   plays muted and looping over the still it starts from. Too heavy for the Worker, it lives in the
   public R2 bucket `carodo-media` at `https://media.carodo.app/<name>.<hash>.mp4`: `build-media.mjs`
@@ -59,13 +59,13 @@ Max Simulator), never a real drive; each screen has a Dark twin `<name>-dark.*` 
 
 ## Styling
 
-Tailwind (with Preflight) and shadcn Typeset, laid out as linkto's public pages; utility classes in
-the TSX, no React, no shadcn interactive primitives, no HTMX.
+Tailwind (with Preflight) and shadcn Typeset; utility classes in the TSX, no React, no shadcn
+interactive primitives, no HTMX.
 
-- `styles/tokens.css`: the web palette (owner, 2026-11-15): close to carodo-ios `CarodoSurface`,
-  tuned for reading (page `#FAF7F1`, text `#141311`, a Copper accent with more chroma for links,
-  labels and focus); brand Charcoal, Copper and Ivory keep iOS's exact values. Light by default,
-  Dark and Increase Contrast by media query.
+- `styles/tokens.css`: the web palette, close to carodo-ios `CarodoSurface`, tuned for reading
+  (page `#FAF7F1`, text `#141311`, a Copper accent with more chroma for links, labels and focus);
+  brand Charcoal, Copper and Ivory keep iOS's exact values. Light by default, Dark and Increase
+  Contrast by media query.
 - `styles/public.css`: the Tailwind entry, base styles and the public wash under the sticky header.
 - `styles/typeset.css`: vendored shadcn Typeset (MIT, `TYPESET-LICENSE.txt`), from
   https://github.com/shadcn-ui/ui/blob/main/apps/v4/app/(app)/(typeset)/typeset.css, upstream blob

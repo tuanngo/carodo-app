@@ -1,6 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	// carodo-web: the public web and share pages, HTML rendered on the server with no client script.
+	// carodo-web: the public web and share pages, HTML rendered on the server. Client scripts are
+	// only the language switch and, on production, the page-analytics beacon (`SITE_ID`).
 	// It owns no data store: everything it shows comes from the api's `WebRpc` through the `API`
 	// service binding, never from the api's public URL (docs/decisions/0001).
 	//
@@ -70,6 +71,10 @@
 					"custom_domain": true
 				}
 			],
+			"vars": {
+				// Cookieless page analytics. Local and staging omit this so the beacon never loads.
+				"SITE_ID": "pb_live_fv3vxmsmt9y1ymv8gtnuvl5p"
+			},
 			"services": [
 				{
 					"binding": "API",

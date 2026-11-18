@@ -18,7 +18,7 @@
   }
 }
 
-/* The public wash: linkto's veil and glow, drawn behind the top of the page under the header. */
+/* The public wash: warm veil and glow behind the top of the page under the header. */
 @layer utilities {
   .bg-public-wash {
     background-image:
@@ -51,51 +51,11 @@
   }
 }
 
-/* Small motions in the feature cards' strips and the hero: none with Reduce Motion, where the
-   strips rest drawn and played to their middle. */
+/* The centre phone in the hero lifts gently; none with Reduce Motion. */
 @layer utilities {
-  .mock-play {
-    clip-path: inset(0 45% 0 0);
-  }
   @media (prefers-reduced-motion: no-preference) {
-    .mock-spin {
-      transform-origin: 10px 10px;
-      animation: mock-spin 6s linear infinite;
-    }
-    .mock-draw {
-      stroke-dasharray: 1 1;
-      animation: mock-draw 4.5s ease-in-out infinite;
-    }
-    .mock-play {
-      animation: mock-play 6s linear infinite;
-    }
     .hero-float {
       animation: hero-float 7s ease-in-out infinite;
-    }
-  }
-  @keyframes mock-spin {
-    to {
-      rotate: 360deg;
-    }
-  }
-  @keyframes mock-draw {
-    0% {
-      stroke-dashoffset: 1;
-    }
-    55%,
-    85% {
-      stroke-dashoffset: 0;
-    }
-    100% {
-      stroke-dashoffset: -1;
-    }
-  }
-  @keyframes mock-play {
-    from {
-      clip-path: inset(0 100% 0 0);
-    }
-    to {
-      clip-path: inset(0 0 0 0);
     }
   }
   @keyframes hero-float {

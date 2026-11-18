@@ -64,24 +64,23 @@ export const notFoundCopy: Record<SiteLanguage, { title: string; heading: string
   },
 };
 
-/** Feature names (Journeys, Auto Mode, Feed) follow iOS Common/Journeys/Settings.xcstrings. */
+/** Feature names (Journeys, Auto Mode) follow iOS Common/Journeys/Settings.xcstrings. */
 export const landingCopy = {
   vi: {
-    title: "Carodo — Nhật ký lái xe trên iPhone",
+    title: "Carodo · Nhật ký lái xe trên iPhone",
     description:
-      "Nhật ký lái xe trên iPhone: lưu lộ trình, quãng đường và thời gian của từng chuyến đi. Không cần mạng hay tài khoản để ghi chuyến.",
-    badge: "Nhật ký riêng tư · Ghi cả khi mất sóng",
+      "Carodo là nhật ký lái xe riêng tư trên iPhone. Ghi lộ trình, quãng đường và thời gian ngay cả khi offline. Không cần tài khoản. Sao lưu lên iCloud của bạn.",
     headline: "Nhật ký lái xe của riêng bạn.",
     headlineAccent: "Lưu từng chuyến đi trên iPhone.",
     intro:
-      "Lưu lại những cung đường đã qua, quãng đường, thời gian và chiếc xe bạn đã lái. Mở Hành trình để xem lại từng chuyến, hoặc bật Auto Mode để Carodo tự động ghi chuyến đi.",
+      "Liên kết xe, bật Auto Mode, và Carodo ghi chuyến khi bạn lái. Xem lại lộ trình, quãng đường, thời gian và chiếc xe trong Hành trình.",
     trust: "Không cần tài khoản · Không quảng cáo · Sao lưu lên iCloud của bạn",
     screens: "Carodo trên iPhone",
-    featuresHeading: "Lưu chuyến đi. Xem lại kỷ niệm.",
+    loopHeading: "Lái xe. Giữ lại. Xem lại.",
     autoLabel: "Auto Mode",
-    autoTitle: "Tự động ghi chuyến đi",
+    autoTitle: "Liên kết xe. Lái. Chuyến được ghi.",
     autoBody:
-      "Bật Auto Mode để Carodo nhận biết khi bạn bắt đầu lái và tự ghi chuyến đi, kể cả khi ứng dụng đang chạy nền. Liên kết CarPlay hoặc Bluetooth để Carodo biết bạn đang lái xe nào.",
+      "Bật Auto Mode để Carodo ghi chuyến ở nền. Liên kết CarPlay hoặc Bluetooth để biết bạn đang lái xe nào; thêm Phím tắt nếu muốn bắt đầu ngay khi xe kết nối. Bắt đầu lái vẫn có khi bạn muốn ghi tay.",
     journalLabel: "Hành trình",
     journalTitle: "Mỗi chuyến, một trang nhật ký",
     journalBody:
@@ -91,21 +90,18 @@ export const landingCopy = {
     journalAlt: "Chi tiết chuyến đi qua đèo Hải Vân trong Carodo, từ phường Hải Vân đến Chân Mây - Lăng Cô",
     replayAlt:
       "Một khung hình video Phát lại: chiếc xe leo đèo Hải Vân cạnh biển, kèm quãng đường, thời gian và tốc độ",
-    replayLabel: "Phát lại chuyến đi",
+    replayLabel: "Phát lại",
     replayTitle: "Xem lại từng cung đường",
     replayBody:
       "Theo dõi chuyến đi trên bản đồ, từ lúc xuất phát đến khi kết thúc, cùng tốc độ tại từng thời điểm. Bạn cũng có thể lưu chuyến đi thành video ngắn để xem lại.",
-    localTitle: "Lưu trên iPhone",
+    localTitle: "Ở trên iPhone của bạn",
     localBody:
-      "Nhật ký được lưu trên iPhone và sao lưu lên iCloud của bạn nếu bật sao lưu. Chúng tôi không nhận lộ trình của bạn trên máy chủ.",
-    offlineTitle: "Ghi cả khi mất sóng",
-    offlineBody: "Bạn có thể ghi chuyến đi mà không cần mạng hay tài khoản.",
-    feedTitle: "Chia sẻ trên Feed khi bạn muốn",
-    feedBody:
-      "Bạn tự chọn có chia sẻ lên Feed hay không, dưới tên “Ai đó” hoặc tên người dùng của mình. Feed cho thấy cách bạn lái xe, không tiết lộ nơi bạn đi.",
-    privacyHeading: "Riêng tư từ thiết kế.",
+      "Nhật ký nằm trên thiết bị. Bật sao lưu thì bản sao vào iCloud của bạn, và chúng tôi không đọc được. Lịch sử riêng không lên máy chủ Carodo trừ khi bạn chủ động chia sẻ.",
+    offlineTitle: "Không cần tài khoản",
+    offlineBody: "Ghi chuyến và xem Hành trình mà không đăng ký. Không quảng cáo, không theo dõi.",
+    privacyHeading: "Riêng tư ngay từ đầu.",
     privacyLead:
-      "Những gì bạn ghi là của riêng bạn. Carodo không có máy chủ nhận lộ trình của bạn, không quảng cáo, không theo dõi.",
+      "Lịch sử lái xe là của bạn. Nhật ký sống trên iPhone: ghi chuyến không cần tài khoản hay máy chủ của chúng tôi.",
     faqHeading: "Câu hỏi thường gặp",
     faqOffline: "Có cần mạng để ghi chuyến đi không?",
     faqOfflineAnswer: "Không. Carodo ghi lại chuyến đi trên iPhone ngay cả khi không có kết nối mạng.",
@@ -120,6 +116,8 @@ export const landingCopy = {
       "Khi ghi chuyến đi, Carodo dùng GPS nên sẽ tốn pin hơn. Giữa các chuyến, Auto Mode nhận biết chuyển động bằng cơ chế ít tốn pin hơn. Với chuyến đi dài, bạn có thể cắm sạc cho iPhone.",
     faqPrivacy: "Nhật ký được lưu ở đâu?",
     faqPrivacyAnswer: "Nhật ký được lưu trên iPhone và sao lưu lên iCloud của bạn nếu bật sao lưu. Xem thêm trong",
+    ctaHeading: "Bắt đầu với chuyến đi tiếp theo.",
+    ctaBody: "Carodo sắp có trên App Store.",
     privacy: "Quyền riêng tư",
     privacyPolicy: "Chính sách quyền riêng tư",
     terms: "Điều khoản",
@@ -127,27 +125,26 @@ export const landingCopy = {
     contact: "Liên hệ",
     rights: "Bảo lưu mọi quyền.",
     languageAction: "Đổi sang tiếng Anh",
-    home: "Carodo — Trang chủ",
+    home: "Carodo · Trang chủ",
     backHome: "Trang chủ",
     appStore: "Sắp có trên",
-    appStoreLabel: "Carodo — Sắp có trên App Store",
+    appStoreLabel: "Carodo · Sắp có trên App Store",
   },
   en: {
-    title: "Carodo — Your private driving journal on iPhone",
+    title: "Carodo · Your private driving journal on iPhone",
     description:
-      "A private driving journal for iPhone. Record your routes, distances and drive times, even offline. No account needed to record.",
-    badge: "Private by default · Records offline",
+      "Carodo is a private driving journal for iPhone. Record routes, distances and drive times offline. No account needed. Backup to your own iCloud.",
     headline: "Your private driving journal.",
     headlineAccent: "Every drive, kept on your iPhone.",
     intro:
-      "Keep a record of where you drove, how far, how long and which car you used. Look back at any drive in Journeys, or turn on Auto Mode to record automatically.",
+      "Link your car, turn on Auto Mode, and Carodo records as you drive. Look back at the route, distance, time and car in Journeys.",
     trust: "No account needed · No ads · Backup to your own iCloud",
     screens: "Carodo on iPhone",
-    featuresHeading: "Record it. Keep it. Relive it.",
+    loopHeading: "Drive. Keep it. Relive it.",
     autoLabel: "Auto Mode",
-    autoTitle: "Record drives automatically",
+    autoTitle: "Link your car. Drive. It’s recorded.",
     autoBody:
-      "Turn on Auto Mode and Carodo detects when you start driving and records the drive, even while the app is in the background. Link CarPlay or Bluetooth so Carodo knows which car you’re driving.",
+      "Turn on Auto Mode so Carodo records in the background. Link CarPlay or Bluetooth so it knows which car you’re in; add a Shortcuts automation if you want it to start when the car connects. Start Drive is still there when you want to record by hand.",
     journalLabel: "Journeys",
     journalTitle: "A page for every drive",
     journalBody:
@@ -161,16 +158,14 @@ export const landingCopy = {
     replayTitle: "Relive it, turn by turn",
     replayBody:
       "Watch your drive unfold on the map, from start to finish, with your speed at each moment. You can also save it as a short video to watch later.",
-    localTitle: "Kept on your iPhone",
+    localTitle: "On your iPhone",
     localBody:
-      "Your journal stays on your iPhone, with a copy in your own iCloud if backup is on. Our servers do not receive your routes.",
-    offlineTitle: "Records offline",
-    offlineBody: "Record drives without an internet connection or an account.",
-    feedTitle: "Share on the Feed if you choose",
-    feedBody:
-      "You choose whether to share on the Feed, as “Someone” or under your username. It shows how you drive without revealing where you go.",
-    privacyHeading: "Private by design.",
-    privacyLead: "What you record is yours. Carodo has no server that receives your routes, no ads and no tracking.",
+      "Your journal stays on the device. With backup on, a copy goes to your own iCloud, which we can’t read. Private history doesn’t reach Carodo’s servers unless you choose to share.",
+    offlineTitle: "No account required",
+    offlineBody: "Record drives and browse Journeys without signing up. No ads and no tracking.",
+    privacyHeading: "Private by default.",
+    privacyLead:
+      "Your driving history is yours. The journal lives on your iPhone: recording doesn’t need an account or our servers.",
     faqHeading: "Frequently asked questions",
     faqOffline: "Do I need a connection to record?",
     faqOfflineAnswer: "No. Carodo records drives on your iPhone even without a network connection.",
@@ -184,6 +179,8 @@ export const landingCopy = {
       "Recording a drive uses more battery because GPS is active. Between drives, Auto Mode uses lower-power movement updates. Charging during longer drives can help.",
     faqPrivacy: "Where is my journal stored?",
     faqPrivacyAnswer: "On your iPhone, with a copy in your own iCloud if backup is on. Learn more in the",
+    ctaHeading: "Start with the next drive.",
+    ctaBody: "Carodo is coming soon on the App Store.",
     privacy: "Privacy",
     privacyPolicy: "Privacy Policy",
     terms: "Terms",
@@ -191,10 +188,10 @@ export const landingCopy = {
     contact: "Contact",
     rights: "All rights reserved.",
     languageAction: "Switch to Vietnamese",
-    home: "Carodo — Home",
+    home: "Carodo · Home",
     backHome: "Home",
     appStore: "Coming soon on the",
-    appStoreLabel: "Carodo — Coming soon on the App Store",
+    appStoreLabel: "Carodo · Coming soon on the App Store",
   },
 } as const;
 
