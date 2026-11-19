@@ -7,8 +7,8 @@
   been driven on Sunday, a newer change may overtake an older one in flight, and two devices of one
   person may both send. The device's clock can also be wrong. Instants are UTC at rest (P3).
 - Decision:
-  - **Two kinds of time, never mixed.** When something happened (`endedQuarter`, the drive's end
-    rounded down to the quarter hour on the device and kept as `ended_quarter`; `localDate`;
+  - **Two kinds of time, never mixed.** When something happened (`endedAt`, the drive's end
+    rounded down to the quarter hour on the device and kept as `ended_at`; `localDate`;
     `partOfDay`) comes from the device and places it in the Feed. No exact time of a drive reaches
     the server (P9). When the server learnt of something is `Date.now()` on the server and serves
     jobs, cursors, pruning and audit only; it is not kept on a drive, since the arrival of a
@@ -17,9 +17,9 @@
     people: public times go through `services/shared/coarse-time.ts`, with the P9 exceptions for
     own data and protocol times. A day in the driver's zone is computed on the device; the server
     never derives one and never sees a zone.
-  - **Device times are checked, not trusted:** `endedQuarter` is refused (400) off a quarter hour,
+  - **Device times are checked, not trusted:** `endedAt` is refused (400) off a quarter hour,
     (422) more than 15 minutes ahead of the server or more than two days from its `localDate`
-    (the UTC date of `endedQuarter` minus `localDate` outside −2 to +2 days).
+    (the UTC date of `endedAt` minus `localDate` outside −2 to +2 days).
     One older than the Feed's 7 days is answered 204 and not stored.
   - **Revisions order changes, not arrival:** a write carries the trip's revision and is applied
     only when higher than the stored one; a lower or equal one answers success and changes nothing,
@@ -37,9 +37,9 @@
 - Reason: the Feed must say what happened, not when the network allowed it to be said, and must
   never tell anyone when a driver arrived somewhere.
 - Consequence:
-  - `drives` has `revision`, `ended_quarter`, `unpublished_at` (at the quarter hour) and the index
+  - `drives` has `revision`, `ended_at`, `unpublished_at` (at the quarter hour) and the index
     each one needs; the
-    contract's `DriveInput` carries `endedQuarter` and `revision`, `DELETE /v1/feed/drives/{tripId}`
+    contract's `DriveInput` carries `endedAt` and `revision`, `DELETE /v1/feed/drives/{tripId}`
     carries `revision`.
   - The iOS `trips.revision` column is present and is incremented with changes marked for backup.
   - Every later write that the app may send late (shares, badges, profile) follows the same two
