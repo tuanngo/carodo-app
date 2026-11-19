@@ -36,9 +36,9 @@ visible on the bill.
 
   ```sql
   -- no: reads every row before the page
-  SELECT … FROM drives WHERE hidden_at IS NULL ORDER BY drove_at DESC LIMIT 20 OFFSET 200;
+  SELECT … FROM drives WHERE hidden_at IS NULL ORDER BY ended_at DESC LIMIT 20 OFFSET 200;
   -- yes: starts at the cursor the last page returned
-  SELECT … FROM feed_items WHERE sort_hour IS NOT NULL AND (sort_hour, id) < (?, ?) ORDER BY sort_hour DESC, id DESC LIMIT 21;
+  SELECT … FROM feed_items WHERE last_ended_at IS NOT NULL AND (last_ended_at, id) < (?, ?) ORDER BY last_ended_at DESC, id DESC LIMIT 21;
   ```
 - **No `COUNT(*)` on a request path:** it reads every counted row. Count inside a bounded subquery
   (`SELECT count(*) FROM (SELECT 1 … LIMIT N)`, the day's drives, the month's renames), cache what

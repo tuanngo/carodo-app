@@ -14,8 +14,8 @@ downloads an object ([implementation status](architecture.md#implementation-stat
 |---|---|---|
 | Accounts, usernames, App Attest keys, sessions | D1 | Secrets as hashes; held usernames (after a deletion or a rename) as HMACs; the sharing choices (`feed_opt_in`, `display_as`, `show_vehicle`); renames in `username_changes` for 30 days |
 | Username policies (`username_policies`) | D1, seeded | Reserved and profane names (`exact` or `contains`), upserted from `apps/api/seeds/username-policies.sql` |
-| Drives published to the Feed (`drives`) | D1 | Summary; exact `started_at` and `ended_at` for internal logic only; the start's hour `drove_at`; local day and start hour, part of day, weather, the car's make and model, the abstract shape as sent. Never a route, a place or a speed. |
-| Feed items (`feed_items`) | D1 | One per person and local day, a random id; the hour of its newest visible drive's end (`sort_hour`) orders the Feed |
+| Drives published to the Feed (`drives`) | D1 | Summary; `ended_at` on a quarter hour as the device sent it (the only time of a drive, P9); local day and start hour, part of day, weather, the car's make and model, the abstract shape as sent; exact server audit times, never sent. Never a route, a place or a speed. Deleted an hour after it leaves the 7-day Feed, by Stop sharing or by account deletion; an unpublished drive keeps only a tombstone (trip, revision, end) until then |
+| Feed items (`feed_items`) | D1 | One per person and local day, a random id; its newest visible drive's end (`last_ended_at`); others' pages order it by its newest released drive. Deleted with the window, Stop sharing or the account |
 | Reactions (`reactions`) | D1 | One per reader and item; only counts leave the server |
 | Feed pages and community stats | Workers Cache | The JSON under a TTL-bucketed key, never a reader or a token in it (ADR 0008) |
 | Encrypted backups, shared trips, avatars | R2 (key layout below) | No endpoint and no table yet |

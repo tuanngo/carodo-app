@@ -71,10 +71,12 @@ P7. **The backend holds only what is public or shared, and is never a dependency
     installation id.
 P8. **No AI attribution** in commits or PR descriptions: no `Co-Authored-By` for an AI tool, no
     session link, no "Generated with" footer.
-P9. **Coarse at rest, coarse on the way out.** The backend never receives or keeps an exact time
-    of a drive (the device rounds it to the quarter hour); it may keep exact times of its own
-    protocol (sessions, challenges, jobs) and of a person's own acts shown only to them (a
-    reaction's `created_at`). Nothing it sends to anyone else carries a time finer than a quarter
+P9. **Coarse drive times, at rest and on the way out.** The backend never receives or keeps an
+    exact time of a drive (the device rounds it to the quarter hour); it may keep exact server
+    times of its own protocol (sessions, challenges, jobs), of when it received a write (audit
+    columns such as a drive's `published_at`, `updated_at`, `unpublished_at`: never in a
+    response, never a public order) and of a person's own acts shown only to them (a reaction's
+    `created_at`). Nothing it sends to anyone else carries a time finer than a quarter
     hour, nor appears or disappears at a finer moment, and every such time goes through
     `services/shared/coarse-time.ts` (carodo-ios ADR 0007). The exceptions, and only these:
     - **To the person themselves:** their account export (as they sent it), their own sessions
