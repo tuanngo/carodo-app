@@ -17,19 +17,28 @@ export function isQuarter(at: number): boolean {
 }
 
 /**
- * The Feed as others may see it at `now`, all on quarters: a drive is released when its `ended_at`
- * is at most `releasedUpTo` (from the quarter after the one it ended in) and in the window while
- * its `ended_at` is at least `windowStart`.
+ * When others may first see a drive, fixed once when the server receives it: the quarter after the
+ * one it ended in, or after the quarter it arrived in when it came later (Auto Mode noticing an end
+ * late, an outbox flushed after a day offline). Never the moment of arrival: that moment minus a
+ * known delay would tell the end to the minute.
+ */
+export function visibleAt(endedAt: number, receivedAt: number): number {
+  return Math.max(endedAt, floorTo(receivedAt, QUARTER_MS)) + QUARTER_MS;
+}
+
+/**
+ * The Feed at `now`, on quarters: others see a drive once its `visible_at` is at most `quarter`
+ * (services/feed/release.ts makes it so at that quarter), while its `ended_at` is at least
+ * `windowStart`.
  */
 export interface FeedClock {
   quarter: number;
-  releasedUpTo: number;
   windowStart: number;
 }
 
 export function feedClock(now: number): FeedClock {
   const quarter = floorTo(now, QUARTER_MS);
-  return { quarter, releasedUpTo: quarter - QUARTER_MS, windowStart: quarter - FEED_WINDOW_MS };
+  return { quarter, windowStart: quarter - FEED_WINDOW_MS };
 }
 
 /**

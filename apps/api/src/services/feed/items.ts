@@ -1,12 +1,13 @@
 import { DAY_MS } from "../../lib/time/units";
-import { agoLabel, FEED_WINDOW_MS } from "../shared/coarse-time";
+import { agoLabel, FEED_WINDOW_MS, feedClock } from "../shared/coarse-time";
 
 /**
  * Feed items (contract `FeedItem`, carodo-ios ADR 0007): one person's car drives on their local
  * day. An item's id is random and kept for its life, so reactions stay on it when a drive joins or
  * leaves; no response carries an author id, a route, a place, a start, an end or an exact time.
- * `feed_items.last_ended_at` is its newest visible drive's quarter-hour end; readers see only
- * drives already released (services/feed/read.ts).
+ * `feed_items.last_ended_at` is the quarter-hour end of its newest drive others may see (its
+ * `visible_at` reached), the Feed's order; it changes only at a quarter (services/feed/release.ts)
+ * or when a drive is hidden, never when one is published.
  */
 
 /** A visible drive: not unpublished, not hidden by moderation. `d` is drives. */
@@ -14,18 +15,21 @@ export const VISIBLE = "d.hidden_at IS NULL AND d.unpublished_at IS NULL";
 
 /**
  * Recomputes the items `where` selects (`feed_items` columns, bound to `values`) from their
- * visible drives, in one statement: `last_ended_at`, NULL when none is left. Each item reads its drives through `drives_on_item_id`. In a batch after a write that may
- * change nothing (a retry, an older revision), `where` starts with `changes() = 1`: the refresh then
- * writes no row either (cost C3).
+ * visible drives others may see at `now`'s quarter, in one statement: `last_ended_at`, NULL when
+ * none is left. A drive just published is not counted before its `visible_at`, so the item does
+ * not move. Each item reads its drives through `drives_on_item_id`. In a batch after a write that
+ * may change nothing (a retry, an older revision), `where` starts with `changes() = 1`: the refresh
+ * then writes no row either (cost C3).
  */
-function refreshItems(db: D1Database, where: string, values: unknown[]): D1PreparedStatement {
+export function refreshItems(db: D1Database, where: string, values: unknown[], now: number): D1PreparedStatement {
   return db
     .prepare(
       `UPDATE feed_items SET last_ended_at = (
-         SELECT max(d.ended_at) FROM drives d WHERE d.item_id = feed_items.id AND ${VISIBLE})
+         SELECT max(d.ended_at) FROM drives d
+         WHERE d.item_id = feed_items.id AND ${VISIBLE} AND d.visible_at <= ?${values.length + 1})
        WHERE ${where}`,
     )
-    .bind(...values);
+    .bind(...values, feedClock(now).quarter);
 }
 
 /**
@@ -35,11 +39,12 @@ function refreshItems(db: D1Database, where: string, values: unknown[]): D1Prepa
  */
 export function refreshAfterPublish(db: D1Database, accountId: string, localDate: string, now: number) {
   const since = oldestFeedDay(now);
-  return refreshItems(db, "changes() = 1 AND account_id = ?1 AND (local_date = ?2 OR local_date >= ?3)", [
-    accountId,
-    localDate,
-    since,
-  ]);
+  return refreshItems(
+    db,
+    "changes() = 1 AND account_id = ?1 AND (local_date = ?2 OR local_date >= ?3)",
+    [accountId, localDate, since],
+    now,
+  );
 }
 
 /**
@@ -54,11 +59,12 @@ export function oldestFeedDay(now: number): string {
  * After an unpublish, in its batch right after the tombstone's upsert: the item of the drive's
  * day (the tombstone keeps its local day and no longer its item).
  */
-export function refreshItemOfTrip(db: D1Database, accountId: string, tripId: string) {
+export function refreshItemOfTrip(db: D1Database, accountId: string, tripId: string, now: number) {
   return refreshItems(
     db,
     "changes() = 1 AND account_id = ?1 AND local_date = (SELECT local_date FROM drives WHERE trip_id = ?2)",
     [accountId, tripId],
+    now,
   );
 }
 
@@ -83,6 +89,8 @@ export interface DriveRow {
   elapsed_duration_s: number;
   /** On a quarter hour; only ever turned into an age (never in a response). */
   ended_at: number;
+  /** When others may first see it (a quarter hour); never in a response. */
+  visible_at: number;
   part_of_day: string;
   weather: string | null;
   shape: string | null;

@@ -8,12 +8,12 @@ import {
   COUNTS_SQL,
   DRIVES_SQL,
   ITEMS,
+  ITEMS_SQL,
   MINE_SQL,
   OWN_COUNTS_SQL,
   OWN_SQL,
-  RECENT_SQL,
-  RELEASED_SQL,
 } from "../../../src/services/feed/read";
+import { releaseFeed } from "../../../src/services/feed/release";
 import { BUSIEST_SQL, TOTALS_SQL } from "../../../src/services/feed/stats";
 import { pruneExpired } from "../../../src/services/jobs/prune";
 import { feedClock } from "../../../src/services/shared/coarse-time";
@@ -71,9 +71,9 @@ beforeAll(async () => {
     ).bind(JSON.stringify(itemRows)),
     env.DB.prepare(
       `INSERT INTO drives (trip_id, account_id, item_id, distance_m, moving_duration_s, elapsed_duration_s, ended_at,
-         local_date, local_start_hour, part_of_day, weather, revision, published_at, updated_at)
-       SELECT value ->> 0, value ->> 1, value ->> 2, 1000, 60, 60, value ->> 3, value ->> 4, 8, 'morning', 'clear',
-         1, 0, 0 FROM json_each(?)`,
+         visible_at, local_date, local_start_hour, part_of_day, weather, revision, published_at, updated_at)
+       SELECT value ->> 0, value ->> 1, value ->> 2, 1000, 60, 60, value ->> 3, (value ->> 3) + 900000, value ->> 4, 8,
+         'morning', 'clear', 1, 0, 0 FROM json_each(?)`,
     ).bind(JSON.stringify(driveRows)),
     env.DB.prepare(
       `INSERT INTO reactions (item_id, account_id, reaction, created_at)
@@ -93,27 +93,17 @@ describe(`Feed reads at size (${ACCOUNTS} accounts, ${DRIVES} drives over a year
   const clock = feedClock(NOW);
 
   it("reads about a page of items, and their drives and reactions", async () => {
-    const items = await rowsRead(
-      RELEASED_SQL,
-      clock.windowStart,
-      clock.releasedUpTo,
-      FIRST_POSITION.key,
-      FIRST_POSITION.itemId,
-    );
-    const recent = await rowsRead(RECENT_SQL, clock.releasedUpTo);
-    console.log(
-      `feed items: ${items.read} rows read for ${items.results.length} rows; recent: ${recent.read} for ${recent.results.length}`,
-    );
+    const items = await rowsRead(ITEMS_SQL, clock.windowStart, FIRST_POSITION.key, FIRST_POSITION.itemId);
+    console.log(`feed items: ${items.read} rows read for ${items.results.length} rows`);
     // An item and its account: two rows per item on the page, and the index's.
     expect(items.read).toBeLessThanOrEqual(3 * (ITEMS + 1) + 2);
-    expect(recent.read).toBeLessThanOrEqual(3 * recent.results.length + 2);
 
     const ids = JSON.stringify((items.results as { id: string }[]).slice(0, ITEMS).map((row) => row.id));
-    const drives = await rowsRead(DRIVES_SQL, ids, clock.windowStart, clock.releasedUpTo);
+    const drives = await rowsRead(DRIVES_SQL, ids, clock.windowStart, clock.quarter);
     const counts = await rowsRead(COUNTS_SQL, ids);
     const mine = await rowsRead(MINE_SQL, reader, ids);
     const own = await rowsRead(OWN_SQL, account(1), oldestFeedDay(NOW), clock.windowStart);
-    const ownCounts = await rowsRead(OWN_COUNTS_SQL, account(1), oldestFeedDay(NOW), clock.releasedUpTo);
+    const ownCounts = await rowsRead(OWN_COUNTS_SQL, account(1), oldestFeedDay(NOW), clock.quarter);
     console.log(
       `feed drives: ${drives.read}, counts: ${counts.read}, mine: ${mine.read}, own: ${own.read} for ${own.results.length}, own counts: ${ownCounts.read} rows read`,
     );
@@ -132,11 +122,11 @@ describe(`Feed reads at size (${ACCOUNTS} accounts, ${DRIVES} drives over a year
       await rowsRead(
         "SELECT count(*) AS n FROM drives WHERE ended_at BETWEEN ? AND ? -- full scan: test",
         clock.windowStart,
-        clock.releasedUpTo,
+        clock.quarter,
       )
     ).results[0] as { n: number };
-    const totals = await rowsRead(TOTALS_SQL, clock.windowStart, clock.releasedUpTo);
-    const busiest = await rowsRead(BUSIEST_SQL, clock.windowStart, clock.releasedUpTo);
+    const totals = await rowsRead(TOTALS_SQL, clock.windowStart, clock.quarter);
+    const busiest = await rowsRead(BUSIEST_SQL, clock.windowStart, clock.quarter);
     console.log(`stats: ${totals.read} + ${busiest.read} rows read for ${window.n} drives in the window`);
     expect(totals.read).toBeLessThanOrEqual(2 * window.n + 2);
     expect(busiest.read).toBeLessThanOrEqual(2 * window.n + 2);
@@ -186,6 +176,23 @@ describe(`Feed reads at size (${ACCOUNTS} accounts, ${DRIVES} drives over a year
     expect((await publishDrive(withDb, caller, tripId, drive.data, now)).ok).toBe(true);
     console.log(`publish (retry): ${totals.read - second.read} rows read, ${totals.written - second.written} written`);
     expect(totals.written - second.written).toBe(0);
+  });
+
+  it("lists a quarter's newly visible drives reading about them, and nothing when run again", async () => {
+    // A quarter's worth: the drives that became visible at NOW's quarter, their items not yet showing them.
+    await env.DB.prepare(
+      "UPDATE feed_items SET last_ended_at = NULL WHERE id IN (SELECT item_id FROM drives WHERE visible_at = ?)",
+    )
+      .bind(clock.quarter)
+      .run();
+    const first = await releaseFeed(env.DB, clock.quarter - 15 * 60_000, clock.quarter);
+    const again = await releaseFeed(env.DB, clock.quarter - 15 * 60_000, clock.quarter);
+    console.log(
+      `feed.release: ${first.items} items listed, ${first.rowsRead} rows read; again: ${again.items}, ${again.rowsRead}`,
+    );
+    expect(first.rowsRead).toBeLessThanOrEqual(10 * first.items + 4);
+    expect(first.done).toBe(true);
+    expect(again.items).toBe(0);
   });
 
   // Last: it deletes most of the year.

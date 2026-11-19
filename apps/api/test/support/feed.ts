@@ -29,8 +29,8 @@ export async function seedDriver(
 
 /**
  * One item (a local day) of `accountId` with a visible drive ending at each of `endedAts` (floored
- * to the quarter hour, as the device sends them), as publishing leaves it: the item's
- * last_ended_at is its newest drive's.
+ * to the quarter hour, as the device sends them), each received on time (others see it from the
+ * next quarter), and the item as the quarter-hour job leaves it: last_ended_at is its newest drive's.
  */
 export async function seedDay(accountId: string, localDate: string, endedAts: number[]): Promise<string> {
   const itemId = crypto.randomUUID();
@@ -43,9 +43,9 @@ export async function seedDay(accountId: string, localDate: string, endedAts: nu
     ...quarters.map((endedAt) =>
       env.DB.prepare(
         `INSERT INTO drives (trip_id, account_id, item_id, vehicle_make, vehicle_model, distance_m, moving_duration_s,
-           elapsed_duration_s, ended_at, local_date, local_start_hour, part_of_day, weather, revision, published_at,
-           updated_at)
-         VALUES (?, ?, ?, 'Kia', 'K3', 1000, 600, 600, ?4, ?5, 8, 'morning', 'clear', 1, 0, 0)`,
+           elapsed_duration_s, ended_at, visible_at, local_date, local_start_hour, part_of_day, weather, revision,
+           published_at, updated_at)
+         VALUES (?, ?, ?, 'Kia', 'K3', 1000, 600, 600, ?4, ?4 + ${QUARTER}, ?5, 8, 'morning', 'clear', 1, 0, 0)`,
       ).bind(crypto.randomUUID(), accountId, itemId, endedAt, localDate),
     ),
   ]);

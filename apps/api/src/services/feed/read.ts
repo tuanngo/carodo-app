@@ -18,12 +18,11 @@ import {
  * every reader in a quarter hour, so it is computed once and cached (ADR 0008); a member's own part
  * (their reactions, their drives others cannot see yet) is laid over it afterwards.
  *
- * Others see a drive from the quarter after the one it ended in (P9: `FeedClock`), so a page holds
- * only released drives and orders an item by its newest released one. An item's `last_ended_at`
- * is its newest drive's, released or not: the items touched in the last quarter are read apart
- * (`RECENT_SQL`, few) and placed by their released drives, so a publish never moves or hides an
- * item between quarters. Pages are keyset on (key, `id`), never an offset (cost C1); inside a
- * quarter items go by their random id, so the order tells no finer time.
+ * Others see a drive from its `visible_at`, a quarter hour (P9, services/shared/coarse-time.ts), and
+ * an item is placed by its newest such drive (`last_ended_at`, moved only at a quarter by
+ * services/feed/release.ts), so a publish never moves or shows anything between quarters. Pages are
+ * keyset on (`last_ended_at`, `id`), never an offset (cost C1); inside a quarter items go by their
+ * random id, so the order tells no finer time.
  */
 
 export const ITEMS = 20;
@@ -46,26 +45,22 @@ const ITEM_COLUMNS = "i.id, i.account_id, i.last_ended_at, a.username, a.display
 const ITEM_JOIN = "feed_items i JOIN accounts a ON a.id = i.account_id";
 const LIVE_ACCOUNT = "a.deleted_at IS NULL AND a.feed_opt_in = 1";
 
-/**
- * The page's items whose drives are all released, by `feed_items_on_feed`: ?1 the window's start,
- * ?2 the last released quarter, ?3 and ?4 the position.
- */
-export const RELEASED_SQL = `SELECT ${ITEM_COLUMNS} FROM ${ITEM_JOIN}
-       WHERE i.last_ended_at IS NOT NULL AND i.last_ended_at BETWEEN ?1 AND ?2
-         AND (i.last_ended_at, i.id) < (?3, ?4) AND ${LIVE_ACCOUNT}
+/** A page's items, by `feed_items_on_feed`: ?1 the window's start, ?2 and ?3 the position. */
+export const ITEMS_SQL = `SELECT ${ITEM_COLUMNS} FROM ${ITEM_JOIN}
+       WHERE i.last_ended_at IS NOT NULL AND i.last_ended_at >= ?1 AND (i.last_ended_at, i.id) < (?2, ?3)
+         AND ${LIVE_ACCOUNT}
        ORDER BY i.last_ended_at DESC, i.id DESC LIMIT ${ITEMS + 1}`;
 
-/** Items with a drive not released yet, by `feed_items_on_feed`: ?1 the last released quarter. */
-export const RECENT_SQL = `SELECT ${ITEM_COLUMNS} FROM ${ITEM_JOIN}
-       WHERE i.last_ended_at IS NOT NULL AND i.last_ended_at > ?1 AND ${LIVE_ACCOUNT}`;
-
 const DRIVE_COLUMNS = `d.item_id, d.trip_id, d.vehicle_make, d.vehicle_model, d.distance_m, d.elapsed_duration_s,
-         d.ended_at, d.part_of_day, d.weather, d.shape`;
+         d.ended_at, d.visible_at, d.part_of_day, d.weather, d.shape`;
 
-/** The items' released drives, by `drives_on_item_id`: ?1 the items (JSON), ?2 and ?3 the window. */
+/**
+ * The items' drives others may see, by `drives_on_item_id`: ?1 the items (JSON), ?2 the window's
+ * start, ?3 the quarter.
+ */
 export const DRIVES_SQL = `SELECT ${DRIVE_COLUMNS}
        FROM drives d WHERE d.item_id IN (SELECT value FROM json_each(?1)) AND ${VISIBLE}
-         AND d.ended_at BETWEEN ?2 AND ?3`;
+         AND d.ended_at >= ?2 AND d.visible_at <= ?3`;
 
 /** The page's reaction counts, by the reactions' primary key: ?1 the items (JSON). */
 export const COUNTS_SQL = `SELECT item_id, reaction, count(*) AS n FROM reactions
@@ -88,11 +83,11 @@ export const OWN_SQL = `SELECT ${DRIVE_COLUMNS}, a.username, a.display_as, a.sho
 /**
  * The reaction counts of the reader's items holding a drive others cannot see yet, by
  * `drives_on_account_id` and the reactions' primary key: ?1 the reader, ?2 the oldest local day,
- * ?3 the last released quarter.
+ * ?3 the quarter.
  */
 export const OWN_COUNTS_SQL = `SELECT item_id, reaction, count(*) AS n FROM reactions
        WHERE item_id IN (SELECT d.item_id FROM drives d WHERE d.account_id = ?1 AND d.local_date >= ?2
-         AND d.ended_at > ?3 AND ${VISIBLE}) GROUP BY item_id, reaction`;
+         AND d.visible_at > ?3 AND ${VISIBLE}) GROUP BY item_id, reaction`;
 
 export async function parseCursor(root: string, cursor: string | undefined): Promise<Result<FeedPosition>> {
   if (cursor === undefined || cursor === "") return ok(FIRST_POSITION);
@@ -101,52 +96,33 @@ export async function parseCursor(root: string, cursor: string | undefined): Pro
 
 type Count = { item_id: string; reaction: string; n: number };
 
-/** The page as every reader sees it in the quarter of `clock`: four indexed reads in two round trips. */
+/** The page as every reader sees it in the quarter of `clock`: three indexed reads in two round trips. */
 export async function sharedPage(env: Env, position: FeedPosition, clock: FeedClock): Promise<SharedPage> {
-  const { windowStart, releasedUpTo } = clock;
-  const [released, recent] = await env.DB.batch<ItemRow>([
-    env.DB.prepare(RELEASED_SQL).bind(windowStart, releasedUpTo, position.key, position.itemId),
-    env.DB.prepare(RECENT_SQL).bind(releasedUpTo),
-  ]);
-  const releasedRows = released?.results ?? [];
-  const recentRows = recent?.results ?? [];
-  if (releasedRows.length === 0 && recentRows.length === 0) return { items: [], nextCursor: null, hasMore: false };
+  const { results: rows } = await env.DB.prepare(ITEMS_SQL)
+    .bind(clock.windowStart, position.key, position.itemId)
+    .all<ItemRow>();
+  const kept = rows.slice(0, ITEMS);
+  if (kept.length === 0) return { items: [], nextCursor: null, hasMore: false };
 
-  const ids = JSON.stringify([...releasedRows, ...recentRows].map((row) => row.id));
+  const ids = JSON.stringify(kept.map((row) => row.id));
   const [drives, counts] = await env.DB.batch<DriveRow | Count>([
-    env.DB.prepare(DRIVES_SQL).bind(ids, windowStart, releasedUpTo),
+    env.DB.prepare(DRIVES_SQL).bind(ids, clock.windowStart, clock.quarter),
     env.DB.prepare(COUNTS_SQL).bind(ids),
   ]);
   const byItem = groupBy((drives?.results ?? []) as DriveRow[]);
-
-  // A recent item goes where its newest released drive puts it; with none, it is not on the Feed yet.
-  const placed = recentRows.flatMap((row) => {
-    const ends = (byItem.get(row.id) ?? []).map((drive) => drive.ended_at);
-    return ends.length === 0 ? [] : [{ ...row, last_ended_at: Math.max(...ends) }];
-  });
-  const merged = [...releasedRows, ...placed.filter((row) => before(row, position))].sort(
-    (a, b) => b.last_ended_at - a.last_ended_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
-  );
-  const kept = merged.slice(0, ITEMS);
-  if (kept.length === 0) return { items: [], nextCursor: null, hasMore: false };
-
   const reactions = new Map<string, Record<string, number>>();
   for (const row of (counts?.results ?? []) as Count[]) {
     reactions.set(row.item_id, { ...reactions.get(row.item_id), [row.reaction]: row.n });
   }
-  const now = clock.quarter;
-  const items = kept.flatMap((row) => feedItem(row, byItem.get(row.id) ?? [], reactions.get(row.id) ?? {}, now) ?? []);
+  const items = kept.flatMap(
+    (row) => feedItem(row, byItem.get(row.id) ?? [], reactions.get(row.id) ?? {}, clock.quarter) ?? [],
+  );
 
   // The cursor follows the last item read, kept or not, so a page left short never repeats one.
   const last = kept.at(-1) as ItemRow;
-  const hasMore = merged.length > ITEMS;
+  const hasMore = rows.length > ITEMS;
   const nextCursor = hasMore ? await sealCursor(env.SECRET_KEY, { key: last.last_ended_at, itemId: last.id }) : null;
   return { items, nextCursor, hasMore };
-}
-
-/** Whether `row` comes after `position` in the Feed's order. */
-function before(row: ItemRow, position: FeedPosition): boolean {
-  return row.last_ended_at < position.key || (row.last_ended_at === position.key && row.id < position.itemId);
 }
 
 type OwnRow = DriveRow & Pick<ItemRow, "username" | "display_as" | "show_vehicle">;
@@ -174,7 +150,7 @@ export async function readerPage(
     [
       env.DB.prepare(MINE_SQL).bind(readerId, JSON.stringify(pageIds)),
       env.DB.prepare(OWN_SQL).bind(readerId, oldestDay, clock.windowStart),
-      env.DB.prepare(OWN_COUNTS_SQL).bind(readerId, oldestDay, clock.releasedUpTo),
+      env.DB.prepare(OWN_COUNTS_SQL).bind(readerId, oldestDay, clock.quarter),
     ],
   );
   const mine = new Map(
@@ -183,7 +159,7 @@ export async function readerPage(
 
   // The reader's items holding a drive others cannot see yet, rebuilt from all their drives.
   const ownDrives = (ownResult?.results ?? []) as OwnRow[];
-  const pending = new Set(ownDrives.filter((drive) => drive.ended_at > clock.releasedUpTo).map((d) => d.item_id));
+  const pending = new Set(ownDrives.filter((drive) => drive.visible_at > clock.quarter).map((d) => d.item_id));
   const counts = new Map<string, Record<string, number>>();
   for (const row of (ownCounts?.results ?? []) as Count[]) {
     counts.set(row.item_id, { ...counts.get(row.item_id), [row.reaction]: row.n });

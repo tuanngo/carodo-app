@@ -6,6 +6,6 @@ export { WebRpc } from "./rpc/web-rpc";
 export default {
   fetch: app.fetch,
   scheduled(controller, env, ctx) {
-    ctx.waitUntil(runScheduled(env, controller.scheduledTime));
+    ctx.waitUntil(runScheduled(env, controller.scheduledTime, controller.cron));
   },
 } satisfies ExportedHandler<Env>;

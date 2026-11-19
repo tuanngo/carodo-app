@@ -37,8 +37,10 @@ const TARGETS: PruneTarget[] = [
   // The Feed deletes itself (P9, ADR 0007): a drive, or an unpublished drive's tombstone, an hour
   // after it left the 7 days; a tombstone is useless by then, since an older drive is not stored.
   { table: "drives", key: "trip_id", column: "ended_at", keepMs: FEED_WINDOW_MS + HOUR_MS },
-  // Then the items too old to hold a drive in the window (their reactions cascade); after drives
-  // in the batch, so no drive points at a deleted item.
+  // Then the items whose newest drive left the window, and those too old to hold one in it (their
+  // reactions cascade); after drives in the batch. The second also takes items that never listed
+  // a drive (hidden before it became visible).
+  { table: "feed_items", key: "id", column: "last_ended_at", keepMs: FEED_WINDOW_MS + HOUR_MS },
   {
     table: "feed_items",
     key: "id",
@@ -60,7 +62,10 @@ export async function pruneExpired(db: D1Database, now: number): Promise<PruneCo
         .bind(cutoff ? cutoff(now) : now - keepMs),
     ),
   );
-  return Object.fromEntries(TARGETS.map(({ table }, i) => [table, results[i]?.meta.changes ?? 0]));
+  const counts: PruneCounts = {};
+  for (const [i, { table }] of TARGETS.entries())
+    counts[table] = (counts[table] ?? 0) + (results[i]?.meta.changes ?? 0);
+  return counts;
 }
 
 /** Job history older than this is dropped; enough to see what happened last month. */

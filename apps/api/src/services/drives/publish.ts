@@ -2,7 +2,7 @@ import { writeEvent } from "../../lib/observability/analytics";
 import { isUuid } from "../../lib/platform/ids";
 import type { AccountCaller } from "../auth/sessions";
 import { refreshAfterPublish, refreshItemOfTrip, VISIBLE } from "../feed/items";
-import { feedClock } from "../shared/coarse-time";
+import { feedClock, visibleAt } from "../shared/coarse-time";
 import { integerIn } from "../shared/input";
 import { fail, ok, type Result } from "../shared/result";
 import type { DriveFields } from "./input";
@@ -56,14 +56,16 @@ export async function publishDrive(
 
   // Sharing is checked again in the statement, so a drive racing Stop sharing is not published
   // after it. The day's other drives are counted here too, so two publishes at once cannot both
-  // take the last place; the count reads at most ?18 rows of `drives_on_account_id`.
+  // take the last place; the count reads at most ?16 rows of `drives_on_account_id`. Others may
+  // see the drive from ?17 (visibleAt); a new revision of a drive they already see (?18 is this
+  // quarter) keeps its time, so an edit never takes it off the Feed and back.
   const upsert = db
     .prepare(
       `INSERT INTO drives (trip_id, account_id, item_id, vehicle_make, vehicle_model, distance_m,
-         moving_duration_s, elapsed_duration_s, ended_at, local_date, local_start_hour, part_of_day, weather,
-         shape, revision, published_at, updated_at)
+         moving_duration_s, elapsed_duration_s, ended_at, visible_at, local_date, local_start_hour, part_of_day,
+         weather, shape, revision, published_at, updated_at)
        SELECT ?1, ?2, (SELECT id FROM feed_items WHERE account_id = ?2 AND local_date = ?9), ?3, ?4, ?5,
-         ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15
+         ?6, ?7, ?8, ?17, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15
        WHERE (SELECT feed_opt_in FROM accounts WHERE id = ?2 AND deleted_at IS NULL) = 1
          AND (SELECT count(*) FROM (
            SELECT 1 FROM drives d WHERE d.account_id = ?2 AND d.local_date = ?9 AND d.trip_id <> ?1
@@ -73,6 +75,8 @@ export async function publishDrive(
          vehicle_model = excluded.vehicle_model, distance_m = excluded.distance_m,
          moving_duration_s = excluded.moving_duration_s, elapsed_duration_s = excluded.elapsed_duration_s,
          ended_at = excluded.ended_at, local_date = excluded.local_date,
+         visible_at = CASE WHEN drives.unpublished_at IS NULL AND drives.hidden_at IS NULL AND drives.visible_at <= ?18
+           THEN drives.visible_at ELSE excluded.visible_at END,
          local_start_hour = excluded.local_start_hour, part_of_day = excluded.part_of_day,
          weather = excluded.weather, shape = excluded.shape, revision = excluded.revision,
          updated_at = excluded.updated_at,
@@ -97,6 +101,8 @@ export async function publishDrive(
       drive.revision,
       now,
       MAX_DRIVES_PER_DAY,
+      visibleAt(drive.endedAt, now),
+      feedClock(now).quarter,
     );
 
   const [, upserted] = await db.batch([item, upsert, refreshAfterPublish(db, caller.accountId, drive.localDate, now)]);
@@ -146,8 +152,8 @@ export async function unpublishDrive(
   const [unpublished] = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO drives (trip_id, account_id, item_id, distance_m, moving_duration_s, elapsed_duration_s,
-         ended_at, local_date, revision, published_at, updated_at, unpublished_at)
-       VALUES (?1, ?2, NULL, 0, 0, 0, ?5, '', ?3, ?4, ?4, ?4)
+         ended_at, visible_at, local_date, revision, published_at, updated_at, unpublished_at)
+       VALUES (?1, ?2, NULL, 0, 0, 0, ?5, ?5, '', ?3, ?4, ?4, ?4)
        ON CONFLICT (trip_id) DO UPDATE SET
          item_id = NULL, vehicle_make = NULL, vehicle_model = NULL, distance_m = 0, moving_duration_s = 0,
          elapsed_duration_s = 0, local_start_hour = NULL, part_of_day = NULL, weather = NULL, shape = NULL,
@@ -155,7 +161,7 @@ export async function unpublishDrive(
          unpublished_at = coalesce(drives.unpublished_at, excluded.unpublished_at)
        WHERE excluded.revision >= drives.revision AND drives.account_id = excluded.account_id`,
     ).bind(tripId, caller.accountId, revision.data, now, feedClock(now).quarter),
-    refreshItemOfTrip(env.DB, caller.accountId, tripId),
+    refreshItemOfTrip(env.DB, caller.accountId, tripId, now),
   ]);
   // Idempotent, and silent about another account's trip: the answer is the same either way.
   if (unpublished?.meta.changes === 1) writeEvent(env.EVENTS, "drive.unpublished");

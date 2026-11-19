@@ -24,6 +24,7 @@ const drive = (overrides: Partial<DriveRow> = {}): DriveRow => ({
   distance_m: 10_000,
   elapsed_duration_s: 900,
   ended_at: Date.UTC(2026, 10, 3, 7, 30),
+  visible_at: Date.UTC(2026, 10, 3, 7, 45),
   part_of_day: "morning",
   weather: "clear",
   shape: null,

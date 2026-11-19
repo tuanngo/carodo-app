@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agoLabel, FEED_WINDOW_MS, feedClock, isQuarter } from "../../../src/services/shared/coarse-time";
+import { agoLabel, FEED_WINDOW_MS, feedClock, isQuarter, visibleAt } from "../../../src/services/shared/coarse-time";
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -16,19 +16,20 @@ describe("isQuarter", () => {
   });
 });
 
-describe("feedClock", () => {
-  it("releases a drive at the quarter after the one it ended in", () => {
-    const ended = at(10, 30); // ended 10:37, sent as 10:30
-    expect(feedClock(at(10, 44, 59, 999)).releasedUpTo).toBe(at(10, 15));
-    expect(feedClock(at(10, 44, 59, 999)).releasedUpTo).toBeLessThan(ended);
-    expect(feedClock(at(10, 45)).releasedUpTo).toBe(ended);
-    expect(feedClock(at(10, 45)).quarter).toBe(at(10, 45));
+describe("visibleAt", () => {
+  it("is the quarter after the end, or after the quarter the server received it in, whichever is later", () => {
+    expect(visibleAt(at(10, 30), at(10, 38))).toBe(at(10, 45));
+    expect(visibleAt(at(10, 30), at(10, 44, 59, 999))).toBe(at(10, 45));
+    // Published at 10:47 (Auto Mode noticed the end late): others see it at 11:00, never at 10:47.
+    expect(visibleAt(at(10, 30), at(10, 47))).toBe(at(11, 0));
+    expect(visibleAt(at(10, 30), at(13, 2))).toBe(at(13, 15));
   });
+});
 
-  it("opens the 7-day window on a quarter", () => {
+describe("feedClock", () => {
+  it("names the quarter and opens the 7-day window on it", () => {
     expect(FEED_WINDOW_MS).toBe(168 * HOUR);
-    expect(feedClock(at(10, 45)).windowStart).toBe(at(10, 45) - 168 * HOUR);
-    expect(feedClock(at(10, 59, 59, 999)).windowStart).toBe(at(10, 45) - 168 * HOUR);
+    expect(feedClock(at(10, 59, 59, 999))).toEqual({ quarter: at(10, 45), windowStart: at(10, 45) - 168 * HOUR });
   });
 });
 

@@ -44,11 +44,13 @@
 		"APP_ATTEST_ENVIRONMENTS": "development",
 		"APP_ATTEST_DEBUG": "1"
 	},
-	// Jobs (src/jobs/scheduled.ts): hourly, off the hour. Locally, with `task dev` running:
-	// curl "localhost:8080/cdn-cgi/handler/scheduled?cron=17+*+*+*+*"
+	// Jobs (src/jobs/scheduled.ts): hourly, off the hour; the Feed's release at every quarter hour.
+	// Locally, with `task dev` running: curl "localhost:8080/cdn-cgi/handler/scheduled?cron=17+*+*+*+*"
+	// (or cron=*/15+*+*+*+*)
 	"triggers": {
 		"crons": [
-			"17 * * * *"
+			"17 * * * *",
+			"*/15 * * * *"
 		]
 	},
 	// Secrets: named here so the generated types never depend on a machine's .dev.vars; the values
@@ -145,13 +147,14 @@
 			],
 			"vars": {
 				"ENVIRONMENT": "staging",
-				"APP_ID": "TEAMID0000.app.carodo.ios",
+				"APP_ID": "C2L2MYQLPF.app.carodo.ios",
 				"APP_ATTEST_ENVIRONMENTS": "development,production",
 				"APP_ATTEST_DEBUG": "1"
 			},
 			"triggers": {
 				"crons": [
-					"17 * * * *"
+					"17 * * * *",
+					"*/15 * * * *"
 				]
 			},
 			"secrets": {
@@ -234,13 +237,14 @@
 			],
 			"vars": {
 				"ENVIRONMENT": "production",
-				"APP_ID": "TEAMID0000.app.carodo.ios",
+				"APP_ID": "C2L2MYQLPF.app.carodo.ios",
 				"APP_ATTEST_ENVIRONMENTS": "production",
 				"APP_ATTEST_DEBUG": "0"
 			},
 			"triggers": {
 				"crons": [
-					"17 * * * *"
+					"17 * * * *",
+					"*/15 * * * *"
 				]
 			},
 			"secrets": {

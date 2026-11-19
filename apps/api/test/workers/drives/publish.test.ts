@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { MAX_DRIVES_PER_DAY } from "../../../src/services/drives/publish";
+import { releaseFeed } from "../../../src/services/feed/release";
 import { claimedAccount, type TestAccount } from "../../support/app-client.ts";
 import { driveInput } from "../../support/drives.ts";
 
@@ -13,6 +14,7 @@ interface DriveRow {
   revision: number;
   distance_m: number;
   ended_at: number;
+  visible_at: number;
   local_date: string;
   local_start_hour: number;
   weather: string;
@@ -22,6 +24,9 @@ interface DriveRow {
   unpublished_at: number | null;
   vehicle_model: string | null;
 }
+
+/** The quarter-hour job run at the next quarters: what was published now becomes visible. */
+const atNextQuarter = () => releaseFeed(env.DB, 0, Date.now() + 2 * QUARTER);
 
 async function row(tripId: string): Promise<DriveRow | null> {
   return env.DB.prepare("SELECT * FROM drives WHERE trip_id = ?").bind(tripId).first<DriveRow>();
@@ -65,11 +70,16 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     expect(stored?.published_at).toBeGreaterThanOrEqual(before);
     expect(stored?.published_at).toBe(stored?.updated_at);
 
+    // Others see it from the quarter after it arrived (it ended two hours ago), never at once.
+    const quarter = before - (before % QUARTER);
+    expect([quarter + QUARTER, quarter + 2 * QUARTER]).toContain(stored?.visible_at);
     expect(await item(stored?.item_id ?? "")).toMatchObject({
       account_id: account.accountId,
       local_date: body.localDate,
-      last_ended_at: endedAt,
+      last_ended_at: null,
     });
+    await atNextQuarter();
+    expect((await item(stored?.item_id ?? ""))?.last_ended_at).toBe(endedAt);
   });
 
   it("answers a drive already out of the 7-day Feed as done, and keeps nothing of it", async () => {
@@ -97,7 +107,8 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     expect(itemId).not.toContain(account.accountId);
     await put(account, second, driveInput({ endedAgoMs: HOUR }, { localDate: day }));
     expect((await row(second))?.item_id).toBe(itemId);
-    // The item moves up to its newest drive.
+    // The item moves up to its newest drive, at the quarter others may see it.
+    await atNextQuarter();
     expect((await item(itemId))?.last_ended_at).toBe((await row(second))?.ended_at);
 
     await put(account, other, driveInput({ endedAgoMs: 26 * HOUR - 30 * 60 * 1000 }, { localDate: previousDay }));
@@ -106,6 +117,7 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     // A new revision moving a drive to another day takes it out of its old item.
     await put(account, second, driveInput({ endedAgoMs: HOUR, revision: 2 }, { localDate: previousDay }));
     expect((await row(second))?.item_id).toBe((await row(other))?.item_id);
+    await atNextQuarter();
     expect((await item(itemId))?.last_ended_at).toBe((await row(first))?.ended_at);
   });
 
@@ -176,8 +188,8 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     const itemId = (await row(kept))?.item_id;
     await env.DB.prepare(
       `INSERT INTO drives (trip_id, account_id, item_id, distance_m, moving_duration_s, elapsed_duration_s,
-         ended_at, local_date, revision, published_at, updated_at)
-       SELECT value, ?, ?, 1000, 60, 60, ?, ?, 1, 0, 0 FROM json_each(?)`,
+         ended_at, visible_at, local_date, revision, published_at, updated_at)
+       SELECT value, ?1, ?2, 1000, 60, 60, ?3, ?3, ?4, 1, 0, 0 FROM json_each(?5)`,
     )
       .bind(
         account.accountId,
@@ -264,6 +276,9 @@ describe("DELETE /v1/feed/drives/{tripId} (late arrivals, ADR 0007)", () => {
     await put(account, tripId, driveInput({ revision: 2 }));
     const itemId = (await row(tripId))?.item_id as string;
     const ended = (await row(tripId))?.ended_at;
+    await atNextQuarter();
+    expect((await item(itemId))?.last_ended_at).toBe(ended);
+    // Hiding takes it off at once, not at a quarter (owner, 2026-11-19).
     expect((await unpublish(account, tripId, 2)).status).toBe(204);
     // Only a tombstone is left: no summary, no item, its end kept for the hourly deletion.
     expect(await row(tripId)).toMatchObject({
@@ -282,6 +297,7 @@ describe("DELETE /v1/feed/drives/{tripId} (late arrivals, ADR 0007)", () => {
 
     expect((await put(account, tripId, driveInput({ revision: 3 }))).status).toBe(204);
     expect(await row(tripId)).toMatchObject({ revision: 3, unpublished_at: null, item_id: itemId });
+    await atNextQuarter();
     expect((await item(itemId))?.last_ended_at).not.toBeNull();
   });
 

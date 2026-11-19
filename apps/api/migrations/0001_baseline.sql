@@ -120,6 +120,9 @@ CREATE TABLE drives (
   -- The only time of a drive: its end as the device sent it, on a quarter hour (P9). Every time in
   -- a response is computed from it in services/shared/coarse-time.ts (carodo-ios ADR 0007).
   ended_at      INTEGER NOT NULL,
+  -- When others may first see it, a quarter hour fixed when the server received it
+  -- (services/shared/coarse-time.ts visibleAt): never the moment of arrival.
+  visible_at    INTEGER NOT NULL,
   local_date    TEXT NOT NULL,                        -- 'YYYY-MM-DD' in the drive's own zone: its item
   local_start_hour INTEGER,                           -- 0–23 local: only the busiest-hour statistic
   region_code   TEXT,                                 -- unused in Feed V1
@@ -137,11 +140,12 @@ CREATE TABLE drives (
 CREATE INDEX drives_on_item_id ON drives (item_id);              -- a Feed page's drives, an item's refresh
 CREATE INDEX drives_on_account_id ON drives (account_id, local_date);  -- Stop sharing, deletion, erase, the day's cap
 CREATE INDEX drives_on_ended_at ON drives (ended_at);  -- community numbers over the window; hourly deletion
+CREATE INDEX drives_on_visible_at ON drives (visible_at);  -- the quarter-hour job: drives others may now see
 
 -- A Feed item: one person's car drives on one local day. Its id is random and kept for the item's
 -- life, also when a drive joins or leaves it, so its reactions stay on it; nothing links it to the
--- account in a response. last_ended_at is the ended_at of its newest visible drive; NULL when it has
--- no visible drive (then it is not on the Feed). created_at is server time, never in a response.
+-- account in a response. last_ended_at is the ended_at of its newest drive others may see (visible_at
+-- reached, set at that quarter by the feed.release job); NULL when none (then it is not on the Feed). created_at is server time, never in a response.
 CREATE TABLE feed_items (
   id            TEXT PRIMARY KEY,
   account_id    TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,

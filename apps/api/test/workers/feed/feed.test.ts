@@ -4,6 +4,7 @@ import type { DriveFields } from "../../../src/services/drives/input";
 import { publishDrive } from "../../../src/services/drives/publish";
 import { FIRST_POSITION } from "../../../src/services/feed/cursor";
 import { type FeedPage, readerPage, sharedPage } from "../../../src/services/feed/read";
+import { releaseFeed } from "../../../src/services/feed/release";
 import { communityStats, MINIMUM_DRIVERS } from "../../../src/services/feed/stats";
 import { feedClock } from "../../../src/services/shared/coarse-time";
 import { attestDevice, BASE, claimedAccount, type TestAccount } from "../../support/app-client.ts";
@@ -58,6 +59,17 @@ const publish = (account: TestAccount, body = driveInput()) =>
   account.send("PUT", `/v1/feed/drives/${crypto.randomUUID()}`, body);
 const byName = (items: Item[], username: string) => items.filter((item) => item.displayName === username);
 
+/**
+ * As if every drive just published had reached the server on time, a quarter ago: others may see
+ * them now, once the quarter-hour job has run. The route tests publish through the API at the real
+ * time, when others could only see the drive from the next quarter.
+ */
+async function asIfOnTime() {
+  const now = Date.now();
+  await env.DB.prepare("UPDATE drives SET visible_at = ended_at + ? WHERE visible_at > ?").bind(QUARTER, now).run();
+  await releaseFeed(env.DB, 0, feedClock(now).quarter);
+}
+
 describe("GET /v1/feed", () => {
   it("shows a guest one item per person and local day, newest drive first, with an ETag", async () => {
     const guest = await attestDevice(env.APP_ID);
@@ -73,6 +85,7 @@ describe("GET /v1/feed", () => {
     expect(
       (await publish(driver, driveInput({ endedAgoMs: 30 * HOUR, distanceM: 8_000 }, { localDate: older }))).status,
     ).toBe(204);
+    await asIfOnTime();
 
     const response = await read(guest.guestToken);
     expect(response.status).toBe(200);
@@ -106,6 +119,7 @@ describe("GET /v1/feed", () => {
     const guest = await attestDevice(env.APP_ID);
     const driver = await claimedAccount(env.APP_ID);
     await publish(driver);
+    await asIfOnTime();
     expect(byName(await readAll(guest.guestToken), driver.username)).toHaveLength(1);
     await driver.send("PUT", "/v1/me/sharing", { sharing: true, displayAs: "anonymous", showVehicle: false });
     expect(byName(await readAll(guest.guestToken), driver.username)).toHaveLength(0);
@@ -119,6 +133,7 @@ describe("GET /v1/feed", () => {
     const tripId = crypto.randomUUID();
     expect((await member.send("PUT", `/v1/feed/drives/${tripId}`, driveInput())).status).toBe(204);
     await publish(other);
+    await asIfOnTime();
 
     const response = await read(member.accessToken);
     expect(response.headers.get("cache-control")).toBe("private, no-cache");
@@ -218,8 +233,10 @@ describe("Feed release (services, fixed clock)", () => {
     const caller = { accountId: driverId, sessionId: "s", keyId: "k", sharing: true };
     expect((await publishDrive(env, caller, crypto.randomUUID(), fields(endedAt), now)).ok).toBe(true);
   };
+  /** A read at `now`, after the quarter-hour job of `now`'s quarter has run. */
   const pageAt = async (readerId: string | null, now: number): Promise<FeedPage> => {
     const clock = feedClock(now);
+    await releaseFeed(env.DB, 0, clock.quarter);
     return readerPage(env, await sharedPage(env, FIRST_POSITION, clock), readerId, clock, now, true);
   };
   const of = (page: FeedPage, username: string) => page.items.filter((item) => item.displayName === username);
@@ -233,6 +250,14 @@ describe("Feed release (services, fixed clock)", () => {
     const own = (await pageAt(driver.id, at(10, 40))).items.filter((item) => item.isAuthor);
     expect(own).toHaveLength(1);
     expect(own[0]).toMatchObject({ ago: "now", drives: [{ ago: "now" }] });
+  });
+
+  it("shows a drive published after its quarter only from the quarter after it arrived", async () => {
+    const driver = await seedDriver();
+    await publishAt(driver.id, at(13, 30), at(13, 47)); // ended 13:37, Auto Mode noticed it at 13:47
+    expect(of(await pageAt(null, at(13, 47)), driver.username)).toHaveLength(0);
+    expect(of(await pageAt(null, at(13, 59, 59, 999)), driver.username)).toHaveLength(0);
+    expect(of(await pageAt(null, at(14, 0)), driver.username)).toHaveLength(1);
   });
 
   it("never changes another reader's page between quarters when a drive is published (Review Focus 1)", async () => {
@@ -249,6 +274,7 @@ describe("Feed release (services, fixed clock)", () => {
     const driver = await seedDriver();
     await publishAt(driver.id, at(11, 30), at(11, 40));
     const clock = feedClock(at(11, 40));
+    await releaseFeed(env.DB, 0, clock.quarter);
     const shared = await sharedPage(env, FIRST_POSITION, clock);
     const own = await readerPage(env, shared, driver.id, clock, at(11, 40), true);
     expect(own.items.filter((item) => item.isAuthor)).toHaveLength(1);
@@ -296,6 +322,7 @@ describe("PUT/DELETE /v1/feed/items/{itemId}/reaction", () => {
       claimedAccount(env.APP_ID),
     ]);
     await publish(author);
+    await asIfOnTime();
     const itemId = byName(await readAll(fan.accessToken), author.username)[0]?.id as string;
 
     expect((await reaction(fan, itemId, { reaction: "fire" })).status).toBe(204);

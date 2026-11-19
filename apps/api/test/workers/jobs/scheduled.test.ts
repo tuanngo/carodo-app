@@ -2,7 +2,7 @@ import { createExecutionContext, createScheduledController, waitOnExecutionConte
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import worker from "../../../src/index";
-import { runScheduled } from "../../../src/jobs/scheduled";
+import { FEED_CRON, runScheduled } from "../../../src/jobs/scheduled";
 import { blobKeys } from "../../../src/lib/storage/keys";
 import { eraseDeletedAccounts } from "../../../src/services/accounts/erase";
 import { isUsernameHeld } from "../../../src/services/accounts/usernames";
@@ -192,14 +192,14 @@ describe("prune.expired", () => {
     const now = Date.now();
     const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
     const [gone, kept] = await Promise.all([seedDriver(), seedDriver()]);
-    const oldItem = await seedDay(gone.id, day(now - 11 * 24 * HOUR), [now - 169 * HOUR]);
+    const oldItem = await seedDay(gone.id, day(now - 8 * 24 * HOUR), [now - 169 * HOUR]);
     const keptItem = await seedDay(kept.id, day(now - 8 * 24 * HOUR), [now - 167 * HOUR]);
     const tombstones = [crypto.randomUUID(), crypto.randomUUID()];
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO drives (trip_id, account_id, distance_m, moving_duration_s, elapsed_duration_s, ended_at,
-           local_date, revision, published_at, updated_at, unpublished_at)
-         VALUES (?1, ?3, 0, 0, 0, ?4, '', 1, 0, 0, 0), (?2, ?3, 0, 0, 0, ?5, '', 1, 0, 0, 0)`,
+           visible_at, local_date, revision, published_at, updated_at, unpublished_at)
+         VALUES (?1, ?3, 0, 0, 0, ?4, ?4, '', 1, 0, 0, 0), (?2, ?3, 0, 0, 0, ?5, ?5, '', 1, 0, 0, 0)`,
       ).bind(tombstones[0], tombstones[1], kept.id, now - 169 * HOUR, now - 167 * HOUR),
       env.DB.prepare("INSERT INTO reactions (item_id, account_id, reaction, created_at) VALUES (?, ?, 'fire', 0)").bind(
         oldItem,
@@ -216,6 +216,28 @@ describe("prune.expired", () => {
     expect(await count("SELECT count(*) AS n FROM drives WHERE trip_id = ?", tombstones[1])).toBe(1);
     expect(await count("SELECT count(*) AS n FROM drives WHERE item_id = ?", keptItem)).toBe(1);
     expect(await count("SELECT count(*) AS n FROM feed_items WHERE id = ?", keptItem)).toBe(1);
+  });
+});
+
+describe("feed.release", () => {
+  it("shows others a drive at its quarter, on its own cron, and only on it", async () => {
+    const driver = await seedDriver();
+    const quarter = Date.now() - (Date.now() % (15 * 60 * 1000)) + 15 * 60 * 1000;
+    const itemId = await seedDay(driver.id, new Date(quarter).toISOString().slice(0, 10), [quarter - HOUR]);
+    // Published late: others may see it from the next quarter, and its item does not list it yet.
+    await env.DB.batch([
+      env.DB.prepare("UPDATE drives SET visible_at = ? WHERE item_id = ?").bind(quarter, itemId),
+      env.DB.prepare("UPDATE feed_items SET last_ended_at = NULL WHERE id = ?").bind(itemId),
+    ]);
+    const listed = () =>
+      count("SELECT count(*) AS n FROM feed_items WHERE id = ? AND last_ended_at IS NOT NULL", itemId);
+
+    await runScheduled(env, quarter - 1, FEED_CRON);
+    expect(await listed()).toBe(0);
+    await runScheduled(env, quarter + 3 * 60 * 1000);
+    expect(await listed()).toBe(0);
+    await runScheduled(env, quarter, FEED_CRON);
+    expect(await listed()).toBe(1);
   });
 });
 

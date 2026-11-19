@@ -2,26 +2,37 @@ import { logEvent } from "../lib/observability/log";
 import { uuidv7 } from "../lib/platform/ids";
 import { MINUTE_MS } from "../lib/time/units";
 import { eraseDeletedAccounts } from "../services/accounts/erase";
+import { releaseFeed } from "../services/feed/release";
 import { pruneExpired, pruneJobRuns } from "../services/jobs/prune";
+import { FEED_WINDOW_MS, feedClock } from "../services/shared/coarse-time";
 
 /**
  * The Cron transport (wrangler.jsonc `triggers.crons`): each job runs under a lease in
  * `job_states`, so a slow run and the next trigger never overlap, and leaves a row in `job_runs`.
- * A failing job is logged and does not stop the others.
+ * A failing job is logged and does not stop the others. Two schedules: the hourly jobs, and the
+ * Feed's release at every quarter hour.
  */
+
+/** wrangler.jsonc: every hour at :17, away from the quarters. */
+export const HOURLY_CRON = "17 * * * *";
+/** wrangler.jsonc: at every quarter hour, when drives become visible to others. */
+export const FEED_CRON = "*/15 * * * *";
 
 const LEASE_MS = 10 * MINUTE_MS;
 
 interface Job {
   name: string;
+  cron: string;
   run(env: Env, now: number): Promise<unknown>;
 }
 
 const JOBS: Job[] = [
-  { name: "account.erase", run: (env, now) => eraseDeletedAccounts(env, now) },
-  { name: "prune.expired", run: (env, now) => pruneExpired(env.DB, now) },
+  { name: "account.erase", cron: HOURLY_CRON, run: (env, now) => eraseDeletedAccounts(env, now) },
+  { name: "prune.expired", cron: HOURLY_CRON, run: (env, now) => pruneExpired(env.DB, now) },
+  { name: "feed.release", cron: FEED_CRON, run: (env, now) => releaseDue(env.DB, now) },
   {
     name: "prune.job_runs",
+    cron: HOURLY_CRON,
     run: (env, now) =>
       pruneJobRuns(
         env.DB,
@@ -33,14 +44,37 @@ const JOBS: Job[] = [
 
 export const JOB_NAMES = JOBS.map((job) => job.name);
 
-/** Every job at once: they are independent, and one failing never holds up or stops another. */
-export async function runScheduled(env: Env, now: number): Promise<void> {
-  const settled = await Promise.allSettled(JOBS.map((job) => runJob(env, job, now)));
+/**
+ * Every job of `cron` at once: they are independent, and one failing never holds up or stops
+ * another. An unknown schedule (a trigger fired by hand) runs the hourly jobs.
+ */
+export async function runScheduled(env: Env, now: number, cron = HOURLY_CRON): Promise<void> {
+  const due = JOBS.filter((job) => job.cron === (cron === FEED_CRON ? FEED_CRON : HOURLY_CRON));
+  const settled = await Promise.allSettled(due.map((job) => runJob(env, job, now)));
   for (const [i, outcome] of settled.entries()) {
     if (outcome.status === "rejected") {
-      logEvent("error", "job.crashed", { job: JOBS[i]?.name, error: String(outcome.reason) });
+      logEvent("error", "job.crashed", { job: due[i]?.name, error: String(outcome.reason) });
     }
   }
+}
+
+/**
+ * The Feed's release from the last quarter done (`job_states.cursor`) to this one; the cursor
+ * moves only when every drive up to this quarter is listed, so a missed or partial run is caught
+ * up by the next. The first run starts a window back.
+ */
+async function releaseDue(db: D1Database, now: number): Promise<unknown> {
+  const { quarter } = feedClock(now);
+  const state = await db
+    .prepare("SELECT cursor FROM job_states WHERE job = 'feed.release'")
+    .first<{ cursor: string | null }>();
+  const from = state?.cursor ? Number(state.cursor) : quarter - FEED_WINDOW_MS;
+  if (from >= quarter) return { items: 0, done: true, rowsRead: 0 };
+  const result = await releaseFeed(db, from, quarter);
+  if (result.done) {
+    await db.prepare("UPDATE job_states SET cursor = ? WHERE job = 'feed.release'").bind(String(quarter)).run();
+  }
+  return result;
 }
 
 async function runJob(env: Env, job: Job, now: number): Promise<void> {

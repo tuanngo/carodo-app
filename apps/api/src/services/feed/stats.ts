@@ -6,7 +6,7 @@ import { VISIBLE } from "./items";
  * only from at least 10 distinct drivers; below that every number is null (never 0) and `warmup`
  * says how close the Feed is, in steps of 0.1. The same for every reader, so it is computed once
  * per cache bucket (ADR 0008); a computation reads the window's drives through `drives_on_ended_at`,
- * only those others can see (released, P9).
+ * only those others can see (past their `visible_at`, P9).
  */
 
 export const MINIMUM_DRIVERS = 10;
@@ -22,8 +22,8 @@ export interface CommunityStats {
   warmup: number | null;
 }
 
-/** ?1 the window's start, ?2 the last released quarter. */
-const WINDOW = `d.ended_at BETWEEN ?1 AND ?2 AND ${VISIBLE}`;
+/** ?1 the window's start, ?2 the quarter: the drives others may see (an end is before its visible_at). */
+const WINDOW = `d.ended_at BETWEEN ?1 AND ?2 AND d.visible_at <= ?2 AND ${VISIBLE}`;
 
 export const TOTALS_SQL = `SELECT count(DISTINCT d.account_id) AS drivers, coalesce(sum(d.distance_m), 0) AS distance_m,
          coalesce(sum(d.elapsed_duration_s), 0) AS duration_s
@@ -36,7 +36,7 @@ export const BUSIEST_SQL = `SELECT d.local_start_hour AS hour, count(*) AS n FRO
 
 export async function communityStats(env: Env, clock: FeedClock): Promise<CommunityStats> {
   const since = clock.windowStart;
-  const until = clock.releasedUpTo;
+  const until = clock.quarter;
   const [totals, busiest] = await env.DB.batch<
     { drivers: number; distance_m: number; duration_s: number } & {
       hour: number;

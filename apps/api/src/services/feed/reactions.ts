@@ -26,8 +26,8 @@ export function parseReaction(body: unknown): Result<string> {
 }
 
 /**
- * Stores the reader's reaction on an item others can see: one with a visible drive released and
- * still in the window (P9: an item holding only drives others cannot see yet is not there).
+ * Stores the reader's reaction on an item others can see: one with a drive past its `visible_at`
+ * and still in the window (P9: an item holding only drives others cannot see yet is not there).
  */
 export async function react(
   env: Env,
@@ -40,10 +40,10 @@ export async function react(
   const { meta } = await env.DB.prepare(
     `INSERT INTO reactions (item_id, account_id, reaction, created_at)
      SELECT ?1, ?2, ?3, ?4
-     WHERE EXISTS (SELECT 1 FROM drives d WHERE d.item_id = ?1 AND ${VISIBLE} AND d.ended_at BETWEEN ?5 AND ?6)
+     WHERE EXISTS (SELECT 1 FROM drives d WHERE d.item_id = ?1 AND ${VISIBLE} AND d.ended_at >= ?5 AND d.visible_at <= ?6)
      ON CONFLICT (item_id, account_id) DO UPDATE SET reaction = excluded.reaction`,
   )
-    .bind(itemId, readerId, reaction, now, clock.windowStart, clock.releasedUpTo)
+    .bind(itemId, readerId, reaction, now, clock.windowStart, clock.quarter)
     .run();
   if (meta.changes === 0) return fail("not_found", "The item is gone.");
   writeEvent(env.EVENTS, "reaction.set", reaction);
