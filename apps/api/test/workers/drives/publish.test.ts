@@ -79,7 +79,11 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
   it("keeps one item per person and local day, with a random id that a joining drive keeps", async () => {
     const account = await claimedAccount(env.APP_ID);
     const [first, second, other] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
-    const day = new Date(Date.now() - 2 * HOUR).toISOString().slice(0, 10);
+    // Both days come from one moment, the newest drive's start: a day read off "now − 26 h" can sit
+    // two UTC days from a drive that ended an hour ago, which the server rejects (before 02:00 UTC).
+    const anchor = Date.now() - HOUR - 25 * 60 * 1000;
+    const day = new Date(anchor).toISOString().slice(0, 10);
+    const previousDay = new Date(anchor - 24 * HOUR).toISOString().slice(0, 10);
     await put(account, first, driveInput({ endedAgoMs: 2 * HOUR }, { localDate: day }));
     const itemId = (await row(first))?.item_id as string;
     expect(itemId).not.toContain(account.accountId);
@@ -88,20 +92,11 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     // The item moves up to its newest drive.
     expect((await item(itemId))?.last_ended_at).toBe((await row(second))?.ended_at);
 
-    const yesterday = new Date(Date.now() - 26 * HOUR);
-    await put(
-      account,
-      other,
-      driveInput({ endedAgoMs: 26 * HOUR - 30 * 60 * 1000 }, { localDate: yesterday.toISOString().slice(0, 10) }),
-    );
+    await put(account, other, driveInput({ endedAgoMs: 26 * HOUR - 30 * 60 * 1000 }, { localDate: previousDay }));
     expect((await row(other))?.item_id).not.toBe(itemId);
 
     // A new revision moving a drive to another day takes it out of its old item.
-    await put(
-      account,
-      second,
-      driveInput({ endedAgoMs: HOUR, revision: 2 }, { localDate: yesterday.toISOString().slice(0, 10) }),
-    );
+    await put(account, second, driveInput({ endedAgoMs: HOUR, revision: 2 }, { localDate: previousDay }));
     expect((await row(second))?.item_id).toBe((await row(other))?.item_id);
     expect((await item(itemId))?.last_ended_at).toBe((await row(first))?.ended_at);
   });
