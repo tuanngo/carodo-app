@@ -157,7 +157,9 @@ with an ETag, from the Workers Cache (ADR 0008). A ranking, when one comes, is p
   several runs, never one long one.
 - Each job runs under a lease in `job_states` and records itself in `job_runs`
   (`src/jobs/scheduled.ts`); running it twice changes nothing more.
-- A cron fires as rarely as the product allows (hourly today). Work that fans out per row at scale
+- A cron fires as rarely as the product allows: hourly, and every quarter hour for the Feed's
+  release (96 small runs a day through `drives_on_visible_at`, so a Feed page reads one page of
+  items and never the drives that just arrived). Work that fans out per row at scale
   goes to a Queue, not a loop.
 
 ### C11. Durable Objects only where one place must decide

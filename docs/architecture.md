@@ -15,11 +15,11 @@ repository, not what is deployed: **Implemented** means the service and transpor
 | Accounts and sessions | Partial | Claim (sharing off unless asked), account-secret login, refresh, deletion and erasure. Username rules in one place: the contract's pattern, reserved words in code, reserved and profane names in `username_policies` (seeded from `apps/api/seeds/`), holds after a deletion or a rename. DeviceCheck enforcement remains a TODO; account export and device/session management are not implemented. |
 | Profile and sharing | Implemented | `GET`/`PUT /v1/me/profile` (3 renames in 30 days, the old name held 90 days), `GET /v1/usernames/{username}` (reason and suggestions), `GET`/`PUT /v1/me/sharing` (Stop sharing takes every drive off the Feed). |
 | Drive publishing | Implemented | `PUT`/`DELETE /v1/feed/drives/{tripId}`: validation (the end on a quarter hour, minutes and 100 m), the geographic refusal, revision ordering, tombstones, a drive older than the window not stored, Stop sharing and account deletion delete, at most 50 visible drives a local day. No route or raw GPS upload. |
-| Feed | Implemented | One worldwide Feed over 7 days that deletes itself: an item per person and local day (`feed_items`, random ids); others see a drive from the quarter hour after it ended, its author at once; keyset pages on (newest released end, id) with sealed cursors, the author's choices at read time, a member's own drives and reactions laid over the shared page, ETags. Report and block are deferred. |
+| Feed | Implemented | One worldwide Feed over 7 days that deletes itself: an item per person and local day (`feed_items`, random ids); others see a drive from its `visible_at` (the quarter hour after it ended, or after it arrived if later; listed by `feed.release`), its author at once, a hidden one leaves at once; keyset pages on (newest released end, id) with sealed cursors, the author's choices at read time, a member's own drives and reactions laid over the shared page, ETags. Report and block are deferred. |
 | Reactions | Implemented | `PUT`/`DELETE /v1/feed/items/{itemId}/reaction`, five fixed reactions, counts only. |
 | Community stats | Implemented | `GET /v1/feed/stats` computed from the window's drives, k-anonymous from 10 drivers, cached for everyone. |
 | Feed cache | Implemented | TTL-bucketed Workers Cache in production configuration; local/staging bypass storage. This does not establish that production is deployed. |
-| Scheduled work | Implemented | Only `account.erase`, `prune.expired` and `prune.job_runs`, with D1 leases and run records. |
+| Scheduled work | Implemented | Hourly `account.erase`, `prune.expired` and `prune.job_runs`; `feed.release` every quarter hour; D1 leases, cursors and run records. |
 | Metrics | Implemented | Request and product-event writers. |
 | Shared trips, previews, avatars and encrypted backups | Not implemented | Schema, R2 key helpers and account-erasure support exist, but upload/download/share endpoints do not. |
 | Live, Following, regions, leaderboards, badges on the Feed, Sign in with Apple | Removed | Not in Feed V1 (carodo-ios ADR 0007); their code and tables were deleted on 2026-11-15 and come back with their own decision. |
@@ -62,7 +62,7 @@ src/
                         rate-limit.ts, request.ts (capped bodies), context.ts (c.var types)
   services/
     shared/             result.ts (Result, ok, fail), input.ts (validation helpers, ADR 0003),
-                        coarse-time.ts (every public time: feedClock, agoLabel)
+                        coarse-time.ts (every public time: visibleAt, feedClock, agoLabel)
     attest/             App Attest: attestation, assertion, keys in D1, the pinned Apple root
     auth/               challenges, guest tokens, sessions and refresh, signed tokens
     accounts/           claim, usernames (policies, holds, suggestions), profile, sharing, deletion, erasure
@@ -108,7 +108,7 @@ in JSON (P3). Every write the app sends may arrive late, so (ADR 0007):
 
 | Time | Source | Used for |
 |---|---|---|
-| When it happened: `ended_at` (on a quarter hour, the only time of a drive), `local_date`, `local_start_hour`, `part_of_day` | The device, rounded there and checked (on a quarter, at most a quarter hour ahead, within two days of its local date; older than the window: not stored) | The release to others and "ago" (`coarse-time.ts`); the Feed's order by an item's newest released end, then its random id; the window and the hourly deletion; the item by `local_date`; the busiest hour by `local_start_hour`. |
+| When it happened: `ended_at` (on a quarter hour, the only time of a drive), `local_date`, `local_start_hour`, `part_of_day`; `visible_at`, from it and the quarter of arrival | The device, rounded there and checked (on a quarter, at most a quarter hour ahead, within two days of its local date; older than the window: not stored) | When others see it (`visible_at`, never the moment of arrival) and "ago" (`coarse-time.ts`); the Feed's order by an item's newest released end, then its random id; the window and the hourly deletion; the item by `local_date`; the busiest hour by `local_start_hour`. |
 | When the server learnt of it: `published_at`, `updated_at`, `unpublished_at`, `created_at` | `Date.now()` on the server, exact | Job cursors and audit; never in a response, never an order |
 
 - A day in the driver's zone comes from the device; the server never derives one or sees a zone.

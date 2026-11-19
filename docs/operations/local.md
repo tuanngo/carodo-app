@@ -32,11 +32,13 @@ cp apps/api/.dev.vars.example apps/api/.dev.vars
 
 ## Jobs
 
-The api's cron (hourly: erase deleted accounts, prune expired rows) does not fire under
-`wrangler dev`. Run it by hand while `task dev` is up:
+The api's crons (hourly: erase deleted accounts, prune expired rows; every quarter hour: list
+the drives others may now see on the Feed) do not fire under `wrangler dev`. Run them by hand
+while `task dev` is up (a drive you publish locally shows to others only after the second):
 
 ```sh
 curl "localhost:8080/cdn-cgi/handler/scheduled?cron=17+*+*+*+*"
+curl "localhost:8080/cdn-cgi/handler/scheduled?cron=*/15+*+*+*+*"
 ```
 
 Each run leaves a row per job in `job_runs` and a `job.finished` log line.

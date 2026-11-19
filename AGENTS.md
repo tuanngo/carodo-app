@@ -81,6 +81,7 @@ P9. **Coarse drive times, at rest and on the way out.** The backend never receiv
     `services/shared/coarse-time.ts` (carodo-ios ADR 0007). The exceptions, and only these:
     - **To the person themselves:** their account export (as they sent it), their own sessions
       and devices, their own settings, and their own drives on the Feed before others see them.
+    - **A person hiding their own drive:** it leaves the Feed at once (owner, 2026-11-19).
     - **Live status, while they opt in:** the elapsed time in whole minutes (not in Feed V1).
     - **Times of the protocol, not of a person:** token and challenge expiries, `Retry-After`, a
       board's period dates; a person's local day (`localDate`) only as a day.
