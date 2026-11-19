@@ -3,22 +3,22 @@ import { concat, fromBase64Url, toBase64Url, utf8 } from "../../lib/encoding/byt
 import { fail, ok, type Result } from "../shared/result";
 
 /**
- * A Feed page's cursor: the last item's key (`sort_hour`, `id`), sealed with AES-GCM. A readable
- * cursor would tie an item's id to its hour and could be crafted to probe the order; a sealed one
+ * A Feed page's cursor: the last item's key (its newest released drive's end, `id`), sealed with
+ * AES-GCM. A readable cursor would tie an item's id to its quarter and could be crafted to probe the order; a sealed one
  * does neither. The IV is an HMAC of the key, so the same position always seals to the same text
  * and a cached page's next page shares its cache key.
  */
 
 export interface FeedPosition {
-  sortHour: number;
+  key: number;
   itemId: string;
 }
 
 /** Before every item: the first page. */
-export const FIRST_POSITION: FeedPosition = { sortHour: Number.MAX_SAFE_INTEGER, itemId: "" };
+export const FIRST_POSITION: FeedPosition = { key: Number.MAX_SAFE_INTEGER, itemId: "" };
 
 export async function sealCursor(root: string, position: FeedPosition): Promise<string> {
-  const plain = utf8(`${position.sortHour}:${position.itemId}`);
+  const plain = utf8(`${position.key}:${position.itemId}`);
   const mac = await crypto.subtle.sign("HMAC", await deriveHmacKey(root, LABEL_FEED_CURSOR_IV), plain);
   const iv = new Uint8Array(mac.slice(0, 12));
   const sealed = await crypto.subtle.encrypt(
@@ -42,7 +42,7 @@ export async function openCursor(root: string, cursor: string): Promise<Result<F
     );
     const match = /^(\d{1,16}):([0-9a-f-]{36})$/.exec(new TextDecoder().decode(plain));
     if (!match) return refused;
-    return ok({ sortHour: Number(match[1]), itemId: match[2] as string });
+    return ok({ key: Number(match[1]), itemId: match[2] as string });
   } catch {
     return refused;
   }

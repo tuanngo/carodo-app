@@ -9,3 +9,6 @@ export const DAY_MS = 24 * HOUR_MS;
 export function floorTo(at: number, unitMs: number): number {
   return Math.floor(at / unitMs) * unitMs;
 }
+
+/** A quarter hour: the finest time of a drive that leaves the device (P9). */
+export const QUARTER_MS = 15 * MINUTE_MS;

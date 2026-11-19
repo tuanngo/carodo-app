@@ -1,34 +1,58 @@
 import { describe, expect, it } from "vitest";
-import { agoBucket, publicHour } from "../../../src/services/shared/coarse-time";
+import { agoLabel, FEED_WINDOW_MS, feedClock, isQuarter } from "../../../src/services/shared/coarse-time";
 
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
-const NOW = Date.UTC(2026, 10, 3, 12, 20);
+const at = (hour: number, minute: number, second = 0, ms = 0) => Date.UTC(2026, 10, 3, hour, minute, second, ms);
+const AGO = /^(now|[1-9]h|1[0-9]h|2[0-3]h|[1-6]d)$/;
 
-describe("publicHour", () => {
-  it("keeps only the hour", () => {
-    expect(publicHour(Date.UTC(2026, 10, 3, 7, 59, 59, 999))).toBe(Date.UTC(2026, 10, 3, 7));
-    expect(publicHour(Date.UTC(2026, 10, 3, 7))).toBe(Date.UTC(2026, 10, 3, 7));
+describe("isQuarter", () => {
+  it("is true only on :00, :15, :30 and :45 with no seconds", () => {
+    for (const minute of [0, 15, 30, 45]) expect(isQuarter(at(10, minute))).toBe(true);
+    expect(isQuarter(at(10, 37))).toBe(false);
+    expect(isQuarter(at(10, 45, 0, 1))).toBe(false);
+    expect(isQuarter(at(10, 45, 1))).toBe(false);
   });
 });
 
-describe("agoBucket", () => {
-  it("is never finer than an hour, and coarser as it ages", () => {
-    const hour = Date.UTC(2026, 10, 3, 12);
-    expect(agoBucket(hour, NOW)).toBe("now");
-    expect(agoBucket(hour + HOUR, NOW)).toBe("now"); // a clock ahead: never negative
-    expect(agoBucket(hour - HOUR, NOW)).toBe("1h");
-    expect(agoBucket(NOW - 5 * HOUR, NOW)).toBe("5h");
-    expect(agoBucket(NOW - 2 * DAY, NOW)).toBe("2d");
-    expect(agoBucket(NOW - 15 * DAY, NOW)).toBe("2w");
-    expect(agoBucket(NOW - 100 * DAY, NOW)).toBe("3mo");
-    expect(agoBucket(NOW - 800 * DAY, NOW)).toBe("2y");
+describe("feedClock", () => {
+  it("releases a drive at the quarter after the one it ended in", () => {
+    const ended = at(10, 30); // ended 10:37, sent as 10:30
+    expect(feedClock(at(10, 44, 59, 999)).releasedUpTo).toBe(at(10, 15));
+    expect(feedClock(at(10, 44, 59, 999)).releasedUpTo).toBeLessThan(ended);
+    expect(feedClock(at(10, 45)).releasedUpTo).toBe(ended);
+    expect(feedClock(at(10, 45)).quarter).toBe(at(10, 45));
   });
 
-  it('calls a drive that ended in the last hour "now", however long ago it started', () => {
-    const twoHoursAgo = Date.UTC(2026, 10, 3, 10);
-    expect(agoBucket(twoHoursAgo, NOW, NOW - 10 * 60_000)).toBe("now");
-    expect(agoBucket(twoHoursAgo, NOW, NOW - 61 * 60_000)).toBe("2h");
-    expect(agoBucket(Date.UTC(2026, 10, 3, 4), NOW, NOW - 5 * 60_000)).toBe("now"); // a long drive
+  it("opens the 7-day window on a quarter", () => {
+    expect(FEED_WINDOW_MS).toBe(168 * HOUR);
+    expect(feedClock(at(10, 45)).windowStart).toBe(at(10, 45) - 168 * HOUR);
+    expect(feedClock(at(10, 59, 59, 999)).windowStart).toBe(at(10, 45) - 168 * HOUR);
+  });
+});
+
+describe("agoLabel", () => {
+  const ended = at(10, 30);
+  const release = ended + 15 * MINUTE;
+
+  it('says "now" before the release and for an hour after it', () => {
+    expect(agoLabel(ended, at(10, 40))).toBe("now");
+    expect(agoLabel(ended, release)).toBe("now");
+    expect(agoLabel(ended, release + HOUR - 1)).toBe("now");
+  });
+
+  it("counts hours, then days, from the release", () => {
+    expect(agoLabel(ended, release + HOUR)).toBe("1h");
+    expect(agoLabel(ended, release + 23 * HOUR)).toBe("23h");
+    expect(agoLabel(ended, release + DAY)).toBe("1d");
+    expect(agoLabel(ended, release + 6 * DAY)).toBe("6d");
+    expect(agoLabel(ended, ended + 7 * DAY)).toBe("6d");
+    expect(agoLabel(ended, ended + 30 * DAY)).toBe("6d");
+  });
+
+  it("always matches the contract's Ago", () => {
+    for (let elapsed = -HOUR; elapsed <= 8 * DAY; elapsed += 7 * MINUTE)
+      expect(agoLabel(ended, ended + elapsed)).toMatch(AGO);
   });
 });

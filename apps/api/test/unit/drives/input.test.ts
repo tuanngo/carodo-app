@@ -6,11 +6,10 @@ const HOUR = 60 * 60 * 1000;
 
 const points = Array.from({ length: 8 }, (_, i) => [i / 7, (i % 2) * 0.5]);
 
-/** Contract 0.28.1 `DriveInput`. */
+/** Contract 0.29.0 `DriveInput`: the end on a quarter hour, minutes and 100 m. */
 const valid = {
   revision: 3,
-  startedAt: "2026-11-03T09:41:17+07:00",
-  endedAt: "2026-11-03T10:37:17+07:00",
+  endedAt: "2026-11-03T10:30:00+07:00",
   localDate: "2026-11-03",
   localStartHour: 9,
   partOfDay: "morning",
@@ -23,14 +22,12 @@ const valid = {
 };
 
 describe("parseDriveInput", () => {
-  it("keeps the exact times for the server and the start's hour for the age", () => {
+  it("keeps the quarter-hour end as the only time of the drive", () => {
     expect(parseDriveInput(valid, NOW)).toEqual({
       ok: true,
       data: {
         revision: 3,
-        startedAt: Date.parse(valid.startedAt),
-        endedAt: Date.parse(valid.endedAt),
-        droveAt: Date.UTC(2026, 10, 3, 2, 0, 0),
+        endedAt: Date.UTC(2026, 10, 3, 3, 30),
         localDate: "2026-11-03",
         localStartHour: 9,
         partOfDay: "morning",
@@ -42,6 +39,26 @@ describe("parseDriveInput", () => {
         shape: { version: 1, points },
       },
     });
+  });
+
+  it("ignores a startedAt key: the server needs no start", () => {
+    expect(parseDriveInput({ ...valid, startedAt: "2026-11-03T09:41:17+07:00" }, NOW).ok).toBe(true);
+  });
+
+  it("refuses a time or a figure the device did not round, as validation", () => {
+    for (const change of [
+      { endedAt: "2026-11-03T10:37:00+07:00" },
+      { endedAt: "2026-11-03T10:45:01+07:00" },
+      { endedAt: "2026-11-03T10:45:00.001+07:00" },
+      { elapsedDurationS: 3361 },
+      { movingDurationS: 30 },
+      { distanceM: 12_050 },
+    ]) {
+      expect(parseDriveInput({ ...valid, ...change }, NOW), JSON.stringify(change)).toMatchObject({
+        ok: false,
+        code: "validation",
+      });
+    }
   });
 
   it("accepts no shape and no car name", () => {
@@ -74,12 +91,15 @@ describe("parseDriveInput", () => {
 
   it("refuses figures out of the contract's range as 422 out_of_range, on both sides of each bound", () => {
     for (const [change, ok] of [
-      [{ distanceM: 99 }, false],
+      [{ distanceM: 0 }, false],
       [{ distanceM: 100 }, true],
-      [{ distanceM: 2_000_001 }, false],
-      [{ elapsedDurationS: 29, movingDurationS: 20 }, false],
-      [{ elapsedDurationS: 30, movingDurationS: 20 }, true],
-      [{ movingDurationS: 3362 }, false],
+      [{ distanceM: 2_000_000 }, true],
+      [{ distanceM: 2_000_100 }, false],
+      [{ elapsedDurationS: 0, movingDurationS: 0 }, false],
+      [{ elapsedDurationS: 60, movingDurationS: 60 }, true],
+      [{ elapsedDurationS: 86_400 }, true],
+      [{ elapsedDurationS: 86_460 }, false],
+      [{ movingDurationS: 3420 }, false],
     ] as const) {
       const result = parseDriveInput({ ...valid, ...change }, NOW);
       if (ok) expect(result.ok, JSON.stringify(change)).toBe(true);
@@ -108,22 +128,22 @@ describe("parseDriveInput", () => {
 });
 
 describe("checkTime", () => {
-  const start = NOW - 2 * HOUR;
-  it("takes a drive that ended up to five minutes ahead of the server, and refuses one further", () => {
-    expect(checkTime(start, NOW + 5 * 60 * 1000, "2026-11-03", NOW).ok).toBe(true);
-    expect(checkTime(start, NOW + 5 * 60 * 1000 + 1, "2026-11-03", NOW).ok).toBe(false);
+  const QUARTER = 15 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  it("takes an end up to a quarter hour ahead of the server, and refuses one further", () => {
+    expect(checkTime(NOW + QUARTER, "2026-11-03", NOW).ok).toBe(true);
+    expect(checkTime(NOW + 2 * QUARTER, "2026-11-03", NOW)).toMatchObject({ ok: false, reason: "start_time_invalid" });
   });
 
-  it("needs the end after the start and at most 24 hours later", () => {
-    expect(checkTime(start, start, "2026-11-03", NOW)).toMatchObject({ ok: false, reason: "start_time_invalid" });
-    expect(checkTime(start - 22 * HOUR, start + 2 * HOUR, "2026-11-02", NOW).ok).toBe(true);
-    expect(checkTime(start - 22 * HOUR - 1, start + 2 * HOUR, "2026-11-02", NOW).ok).toBe(false);
+  it("needs the end's UTC date within two days of the local day", () => {
+    const end = Date.UTC(2026, 10, 3, 1); // 2026-11-03 UTC
+    expect(checkTime(end, "2026-11-01", NOW).ok).toBe(true);
+    expect(checkTime(end, "2026-11-05", NOW).ok).toBe(true);
+    expect(checkTime(end, "2026-10-31", NOW)).toMatchObject({ ok: false, reason: "start_time_invalid" });
+    expect(checkTime(end, "2026-11-06", NOW)).toMatchObject({ ok: false, reason: "start_time_invalid" });
   });
 
-  it("refuses a start in the future, over a year old, or a local day too far from it", () => {
-    expect(checkTime(NOW + 6 * 60 * 1000, NOW + 7 * 60 * 1000, "2026-11-03", NOW).ok).toBe(false);
-    expect(checkTime(NOW - 367 * 24 * HOUR, NOW - 366 * 24 * HOUR, "2025-11-01", NOW).ok).toBe(false);
-    expect(checkTime(start, NOW, "2026-11-05", NOW).ok).toBe(false);
-    expect(checkTime(start, NOW, "2026-11-02", NOW).ok).toBe(true);
+  it("leaves how old a drive may be to the Feed window", () => {
+    expect(checkTime(NOW - 30 * DAY, "2026-10-04", NOW).ok).toBe(true);
   });
 });

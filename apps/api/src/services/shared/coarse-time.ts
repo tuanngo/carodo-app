@@ -1,38 +1,44 @@
-import { DAY_MS, floorTo, HOUR_MS } from "../../lib/time/units";
+import { DAY_MS, floorTo, HOUR_MS, QUARTER_MS } from "../../lib/time/units";
 
 /**
- * How coarse a time may be anywhere public (carodo-ios ADR 0007). The database keeps exact times
- * for the server's own logic; with a drive's duration shown, a finer start, end or award time in a
- * response would tell when a driver arrived somewhere, so every time others can see goes through
- * here:
- *
- * - `publicHour`: the hour a time is ordered and grouped by where others see it (a drive's
- *   `drove_at`). Exact times are stored for the server's own logic and never leave it.
- * - `agoBucket`: how long ago, as the Feed says it.
+ * How coarse a time of a drive may be (P9, carodo-ios ADR 0007). The device sends a drive's end
+ * already on a quarter hour and the server keeps nothing finer; the quarter is the finest time
+ * anyone else may see or observe, so every boundary a reader can notice (a drive appearing, leaving
+ * the window, its age changing, a cached page) falls on a quarter of server time. The server's own
+ * audit columns are exact server time and never leave it (owner, 2026-11-19).
  */
 
-/** The hour `at` falls in: the finest a time others see may be. */
-export function publicHour(at: number): number {
-  return floorTo(at, HOUR_MS);
+/** How long a drive stays on the Feed. */
+export const FEED_WINDOW_MS = 168 * HOUR_MS;
+
+/** True when `at` is a quarter hour (:00, :15, :30, :45 UTC, no seconds). */
+export function isQuarter(at: number): boolean {
+  return at % QUARTER_MS === 0;
 }
 
-/** How long something stays "now" after it ended. */
-const NOW_AFTER_END_MS = HOUR_MS;
+/**
+ * The Feed as others may see it at `now`, all on quarters: a drive is released when its `ended_at`
+ * is at most `releasedUpTo` (from the quarter after the one it ended in) and in the window while
+ * its `ended_at` is at least `windowStart`.
+ */
+export interface FeedClock {
+  quarter: number;
+  releasedUpTo: number;
+  windowStart: number;
+}
+
+export function feedClock(now: number): FeedClock {
+  const quarter = floorTo(now, QUARTER_MS);
+  return { quarter, releasedUpTo: quarter - QUARTER_MS, windowStart: quarter - FEED_WINDOW_MS };
+}
 
 /**
- * The relative time of something that happened in the hour `hourAt` begins: "now", then "1h" to
- * "23h", "1d" to "6d", "1w" to "4w", "1mo" to "11mo", then years. "now" is this hour, or anything
- * whose exact `endedAt` (server-side only) is less than an hour ago: a drive that has just ended.
+ * How long ago a drive was released (`endedAt` + a quarter), as the Feed says it: "now" before
+ * that and for an hour after, then "1h" to "23h", then "1d" to "6d" (contract `Ago`).
  */
-export function agoBucket(hourAt: number, now: number, endedAt?: number): string {
-  const elapsed = Math.max(0, now - hourAt);
+export function agoLabel(endedAt: number, now: number): string {
+  const elapsed = now - (endedAt + QUARTER_MS);
   if (elapsed < HOUR_MS) return "now";
-  if (endedAt !== undefined && now - endedAt < NOW_AFTER_END_MS) return "now";
-  const hours = Math.floor(elapsed / HOUR_MS);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(elapsed / DAY_MS);
-  if (days < 7) return `${days}d`;
-  if (days < 35) return `${Math.floor(days / 7)}w`;
-  if (days < 365) return `${Math.max(1, Math.floor(days / 30.4375))}mo`;
-  return `${Math.floor(days / 365.25)}y`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)}h`;
+  return `${Math.min(6, Math.floor(elapsed / DAY_MS))}d`;
 }

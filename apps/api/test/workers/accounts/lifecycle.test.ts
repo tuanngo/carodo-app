@@ -88,22 +88,20 @@ describe("DELETE /v1/account", () => {
     );
     expect((await sessionOn(await attestDevice(env.APP_ID), account.accountSecret)).status).toBe(401);
 
-    // The row no longer carries the name; the drive left the Feed; erasure is owed.
+    // The row no longer carries the name; the drive and its item are deleted; erasure is owed.
     const row = await env.DB.prepare("SELECT username, display_name, deleted_at FROM accounts WHERE id = ?")
       .bind(account.profile.id)
       .first<{ username: string; deleted_at: number }>();
     expect(row?.username).toBe(`deleted:${account.profile.id}`);
     expect(row?.deleted_at).toBeGreaterThan(0);
-    const visible = await env.DB.prepare("SELECT COUNT(*) AS n FROM drives WHERE account_id = ? AND hidden_at IS NULL")
+    const drives = await env.DB.prepare("SELECT COUNT(*) AS n FROM drives WHERE account_id = ?")
       .bind(account.profile.id)
       .first<{ n: number }>();
-    expect(visible?.n).toBe(0);
-    const onFeed = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM feed_items WHERE account_id = ? AND sort_hour IS NOT NULL",
-    )
+    expect(drives?.n).toBe(0);
+    const items = await env.DB.prepare("SELECT COUNT(*) AS n FROM feed_items WHERE account_id = ?")
       .bind(account.profile.id)
       .first<{ n: number }>();
-    expect(onFeed?.n).toBe(0);
+    expect(items?.n).toBe(0);
     const owed = await env.DB.prepare("SELECT kind FROM pending_ops WHERE target = ?").bind(account.profile.id).first();
     expect(owed).toEqual({ kind: "account.erase" });
 

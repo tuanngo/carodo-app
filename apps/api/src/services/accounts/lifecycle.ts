@@ -2,7 +2,6 @@ import { writeEvent } from "../../lib/observability/analytics";
 import { logEvent } from "../../lib/observability/log";
 import { uuidv7 } from "../../lib/platform/ids";
 import type { AccountCaller } from "../auth/sessions";
-import { refreshItemsOf } from "../feed/items";
 import { fail, ok, type Result } from "../shared/result";
 import { USERNAME_HOLD_MS, usernameHoldHash } from "./usernames";
 
@@ -10,7 +9,7 @@ import { USERNAME_HOLD_MS, usernameHoldHash } from "./usernames";
 
 /**
  * Deletes the account. At once, in one transaction: unusable (secret and every session), its
- * drives and items off the Feed, its reactions gone, and the username held 90 days as a hash
+ * drives and items deleted (P9: nothing of a drive outlives the account on the Feed), its reactions gone, and the username held 90 days as a hash
  * linked to nothing. Erasing every row and object follows (`account.erase`, within 30 days);
  * readers already skip a deleted account.
  */
@@ -33,8 +32,8 @@ export async function deleteAccount(env: Env, caller: AccountCaller, now: number
        ON CONFLICT (name_hash) DO UPDATE SET released_at = excluded.released_at`,
     ).bind(await usernameHoldHash(env.SECRET_KEY, account.username), now + USERNAME_HOLD_MS),
     env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL").bind(now, id),
-    env.DB.prepare("UPDATE drives SET hidden_at = ? WHERE account_id = ? AND hidden_at IS NULL").bind(now, id),
-    ...refreshItemsOf(env.DB, id),
+    env.DB.prepare("DELETE FROM drives WHERE account_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM feed_items WHERE account_id = ?").bind(id),
     env.DB.prepare("DELETE FROM reactions WHERE account_id = ?").bind(id),
     // Work owed: R2 objects under the account's prefixes, then every row (services/accounts/erase.ts).
     env.DB.prepare(

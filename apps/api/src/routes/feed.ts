@@ -7,6 +7,7 @@ import { readThrough } from "../lib/cache/edge-cache";
 import { parseItemId, parseReaction, react, unreact } from "../services/feed/reactions";
 import { parseCursor, readerPage, type SharedPage, sharedPage } from "../services/feed/read";
 import { communityStats } from "../services/feed/stats";
+import { feedClock } from "../services/shared/coarse-time";
 
 /** `/v1/feed`, `/v1/feed/stats`, reactions (carodo-ios ADR 0007; ADR 0008 for the cache). */
 export const feedRoutes = new Hono<AppEnv>();
@@ -33,8 +34,11 @@ feedRoutes.get("/v1/feed", requireReader, rateLimit("RL_READ", byKey), async (c)
   const position = await parseCursor(c.env.SECRET_KEY, cursor);
   if (!position.ok) return failure(c, position);
 
-  // The key names the page, never the reader: every reader shares it (ADR 0008).
+  // The key names the page and its quarter, never the reader: every reader shares it (ADR 0008),
+  // and a new quarter (drives released, ages moved on) is a new page.
+  const clock = feedClock(now);
   const key = new URL("/__cache/v1/feed", c.req.url);
+  key.searchParams.set("q", String(clock.quarter));
   key.searchParams.set("cursor", cursor ?? "");
   const shared = await readThrough({
     store: store(c.env),
@@ -42,10 +46,11 @@ feedRoutes.get("/v1/feed", requireReader, rateLimit("RL_READ", byKey), async (c)
     ttlMs: cursor ? LATER_PAGE_TTL_MS : FIRST_PAGE_TTL_MS,
     now,
     waitUntil: (promise) => c.executionCtx.waitUntil(promise),
-    compute: async () => JSON.stringify(await sharedPage(c.env, position.data, now)),
+    compute: async () => JSON.stringify(await sharedPage(c.env, position.data, clock)),
   });
   const reader = c.var.account?.accountId ?? null;
-  const page = await readerPage(c.env, JSON.parse(shared.body) as SharedPage, reader);
+  // A member's own drives others cannot see yet are laid on here, never into the shared page.
+  const page = await readerPage(c.env, JSON.parse(shared.body) as SharedPage, reader, clock, now, !cursor);
   c.header("x-cache", shared.source);
   // A shared cache may keep a guest's page (public), never hand it to a member, whose page is their own.
   c.header("vary", "authorization");
@@ -54,13 +59,16 @@ feedRoutes.get("/v1/feed", requireReader, rateLimit("RL_READ", byKey), async (c)
 
 feedRoutes.get("/v1/feed/stats", requireReader, rateLimit("RL_READ", byKey), async (c) => {
   const now = Date.now();
+  const clock = feedClock(now);
+  const key = new URL("/__cache/v1/feed/stats", c.req.url);
+  key.searchParams.set("q", String(clock.quarter));
   const shared = await readThrough({
     store: store(c.env),
-    key: new URL("/__cache/v1/feed/stats", c.req.url).toString(),
+    key: key.toString(),
     ttlMs: STATS_TTL_MS,
     now,
     waitUntil: (promise) => c.executionCtx.waitUntil(promise),
-    compute: async () => JSON.stringify(await communityStats(c.env, now)),
+    compute: async () => JSON.stringify(await communityStats(c.env, clock)),
   });
   c.header("x-cache", shared.source);
   return jsonWithETag(c, shared.body, GUEST_CACHE);

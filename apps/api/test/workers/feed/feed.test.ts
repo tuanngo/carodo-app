@@ -1,12 +1,18 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import type { DriveFields } from "../../../src/services/drives/input";
+import { publishDrive } from "../../../src/services/drives/publish";
+import { FIRST_POSITION } from "../../../src/services/feed/cursor";
+import { type FeedPage, readerPage, sharedPage } from "../../../src/services/feed/read";
 import { communityStats, MINIMUM_DRIVERS } from "../../../src/services/feed/stats";
+import { feedClock } from "../../../src/services/shared/coarse-time";
 import { attestDevice, BASE, claimedAccount, type TestAccount } from "../../support/app-client.ts";
 import { driveInput } from "../../support/drives.ts";
 import { seedDay, seedDriver } from "../../support/feed.ts";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+const QUARTER = 15 * 60 * 1000;
 
 interface Item {
   id: string;
@@ -82,13 +88,13 @@ describe("GET /v1/feed", () => {
       totalDistanceM: 42_000,
       reactions: {},
     });
-    // The newest drive started 2 h 25 min ago: its hour began 2 or 3 hours ago, never "now".
-    expect(mine[0]?.ago).toMatch(/^[23]h$/);
+    // The newest drive ended two hours ago: released between 1 h 45 min and 2 h ago.
+    expect(mine[0]?.ago).toBe("1h");
     expect(mine[0]?.drives[0]?.weather).toBe("rain");
     expect(mine[0]?.drives[1]?.weather).toBeUndefined();
     expect(mine[0]?.tripIds).toBeUndefined();
     expect(JSON.stringify(page)).not.toMatch(
-      /tripId|trip_id|accountId|account_id|startedAt|endedAt|ended_at|publishedAt|revision|sort_hour|authorId/,
+      /tripId|trip_id|accountId|account_id|startedAt|endedAt|ended_at|publishedAt|revision|last_ended_at|authorId/,
     );
     expect(JSON.stringify(page)).not.toContain(driver.accountId);
 
@@ -125,7 +131,7 @@ describe("GET /v1/feed", () => {
     expect(theirs[0]?.tripIds).toBeUndefined();
   });
 
-  it("leaves out hidden, unpublished, stopped, opted-out, deleted and older-than-72-hours drives", async () => {
+  it("leaves out hidden, opted-out, deleted and older-than-7-days drives", async () => {
     const guest = await attestDevice(env.APP_ID);
     const recent = Date.now() - 3 * HOUR;
     const day = new Date(recent).toISOString().slice(0, 10);
@@ -134,7 +140,7 @@ describe("GET /v1/feed", () => {
       seedDay(kept.id, day, [recent]),
       seedDay(hidden.id, day, [recent]),
       seedDay(optedOut.id, day, [recent]),
-      seedDay(old.id, new Date(Date.now() - 4 * DAY).toISOString().slice(0, 10), [Date.now() - 73 * HOUR]),
+      seedDay(old.id, new Date(Date.now() - 8 * DAY).toISOString().slice(0, 10), [Date.now() - 169 * HOUR]),
     ]);
     await env.DB.batch([
       // A drive moderation hid whose item was not refreshed: the page still leaves it out.
@@ -152,7 +158,7 @@ describe("GET /v1/feed", () => {
     }
   });
 
-  it("pages by key without repeating an item, newest hour first, and refuses a crafted cursor", async () => {
+  it("pages by key without repeating an item, newest first, and refuses a crafted cursor", async () => {
     const guest = await attestDevice(env.APP_ID);
     const base = Math.floor(Date.now() / HOUR) * HOUR - HOUR;
     // 30 drivers two hours apart within the window, one of them with 3 drives that day (one item).
@@ -167,7 +173,7 @@ describe("GET /v1/feed", () => {
     const items = await readAll(guest.guestToken);
     const names = drivers.map((driver) => driver.username);
     const seen = items.filter((item) => names.includes(item.displayName ?? ""));
-    // All 30 end within the 72 hours (the oldest 59 hours ago), newest first.
+    // All 30 end within the 7 days (the oldest 59 hours ago), newest first.
     expect(seen.map((item) => item.displayName)).toEqual(names);
     expect(seen[7]?.drives).toHaveLength(3);
     expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
@@ -185,6 +191,97 @@ describe("GET /v1/feed", () => {
   it("refuses a reader without a valid token", async () => {
     expect((await exports.default.fetch(`${BASE}/v1/feed`)).status).toBe(401);
     expect((await read("not.a-token")).status).toBe(401);
+  });
+});
+
+/**
+ * The release at the quarter hour (P9), on the services with a fixed clock in 2030, far from every
+ * other test's drives: others see a drive from the quarter after the one it ended in, its author at
+ * once, and a publish never changes another reader's page between quarters.
+ */
+describe("Feed release (services, fixed clock)", () => {
+  const at = (hour: number, minute: number, second = 0, ms = 0) => Date.UTC(2030, 2, 4, hour, minute, second, ms);
+  const fields = (endedAt: number, localDate = "2030-03-04"): DriveFields => ({
+    revision: 1,
+    endedAt,
+    localDate,
+    localStartHour: 8,
+    partOfDay: "morning",
+    distanceM: 5_000,
+    movingDurationS: 600,
+    elapsedDurationS: 600,
+    vehicle: { make: "Kia", model: "K3" },
+    weather: "clear",
+    shape: null,
+  });
+  const publishAt = async (driverId: string, endedAt: number, now: number) => {
+    const caller = { accountId: driverId, sessionId: "s", keyId: "k", sharing: true };
+    expect((await publishDrive(env, caller, crypto.randomUUID(), fields(endedAt), now)).ok).toBe(true);
+  };
+  const pageAt = async (readerId: string | null, now: number): Promise<FeedPage> => {
+    const clock = feedClock(now);
+    return readerPage(env, await sharedPage(env, FIRST_POSITION, clock), readerId, clock, now, true);
+  };
+  const of = (page: FeedPage, username: string) => page.items.filter((item) => item.displayName === username);
+
+  it("shows a drive to others from the next quarter hour, and to its author at once", async () => {
+    const driver = await seedDriver();
+    await publishAt(driver.id, at(10, 30), at(10, 40)); // ended 10:37
+    expect(of(await pageAt(null, at(10, 44, 59, 999)), driver.username)).toHaveLength(0);
+    const released = of(await pageAt(null, at(10, 45)), driver.username);
+    expect(released.map((item) => item.ago)).toEqual(["now"]);
+    const own = (await pageAt(driver.id, at(10, 40))).items.filter((item) => item.isAuthor);
+    expect(own).toHaveLength(1);
+    expect(own[0]).toMatchObject({ ago: "now", drives: [{ ago: "now" }] });
+  });
+
+  it("never changes another reader's page between quarters when a drive is published (Review Focus 1)", async () => {
+    const driver = await seedDriver();
+    await publishAt(driver.id, at(9, 0), at(9, 10));
+    const before = await pageAt(null, at(10, 40));
+    expect(of(before, driver.username)).toHaveLength(1);
+    await publishAt(driver.id, at(10, 30), at(10, 40));
+    expect(await pageAt(null, at(10, 40))).toEqual(before);
+    expect(of(await pageAt(null, at(10, 45)), driver.username)[0]?.drives).toHaveLength(2);
+  });
+
+  it("keeps the author's overlay out of the page others share (Review Focus 2)", async () => {
+    const driver = await seedDriver();
+    await publishAt(driver.id, at(11, 30), at(11, 40));
+    const clock = feedClock(at(11, 40));
+    const shared = await sharedPage(env, FIRST_POSITION, clock);
+    const own = await readerPage(env, shared, driver.id, clock, at(11, 40), true);
+    expect(own.items.filter((item) => item.isAuthor)).toHaveLength(1);
+    const guest = await readerPage(env, shared, null, clock, at(11, 40), true);
+    expect(of(guest, driver.username)).toHaveLength(0);
+    // Later pages do not repeat the author's pinned item.
+    const later = await readerPage(env, shared, driver.id, clock, at(11, 40), false);
+    expect(later.items.filter((item) => item.isAuthor)).toHaveLength(0);
+  });
+
+  it("shows a drive ending at the window's first quarter, not one a quarter older", async () => {
+    const now = at(12, 45);
+    const start = feedClock(now).windowStart;
+    const [inside, outside] = await Promise.all([seedDriver(), seedDriver()]);
+    const day = new Date(start).toISOString().slice(0, 10);
+    await Promise.all([seedDay(inside.id, day, [start]), seedDay(outside.id, day, [start - QUARTER])]);
+    const page = await pageAt(null, now);
+    expect(of(page, inside.username)).toHaveLength(1);
+    expect(of(page, outside.username)).toHaveLength(0);
+  });
+
+  it("orders by the newest released drive, then by the random item id", async () => {
+    const now = Date.UTC(2030, 5, 1, 12);
+    const drivers = await Promise.all(Array.from({ length: 4 }, () => seedDriver()));
+    const ids = await Promise.all([
+      seedDay(drivers[0]?.id as string, "2030-06-01", [now - HOUR]),
+      seedDay(drivers[1]?.id as string, "2030-06-01", [now - HOUR]),
+      seedDay(drivers[2]?.id as string, "2030-06-01", [now - HOUR]),
+      seedDay(drivers[3]?.id as string, "2030-06-01", [now - 30 * 60_000]),
+    ]);
+    const page = await pageAt(null, now);
+    const sameQuarter = ids.slice(0, 3).sort().reverse();
+    expect(page.items.map((item) => item.id)).toEqual([ids[3], ...sameQuarter]);
   });
 });
 
@@ -222,8 +319,12 @@ describe("PUT/DELETE /v1/feed/items/{itemId}/reaction", () => {
     const member = await claimedAccount(env.APP_ID);
     const driver = await seedDriver();
     const fresh = await seedDay(driver.id, new Date().toISOString().slice(0, 10), [Date.now() - HOUR]);
-    const stale = await seedDay(driver.id, new Date(Date.now() - 5 * DAY).toISOString().slice(0, 10), [
-      Date.now() - 4 * DAY,
+    const stale = await seedDay(driver.id, new Date(Date.now() - 9 * DAY).toISOString().slice(0, 10), [
+      Date.now() - 8 * DAY,
+    ]);
+    // Ended this quarter: not released, so nobody else can see it to react.
+    const unreleased = await seedDay(driver.id, new Date(Date.now() - 2 * DAY).toISOString().slice(0, 10), [
+      Date.now(),
     ]);
 
     const guest = await member.device.send(
@@ -239,6 +340,7 @@ describe("PUT/DELETE /v1/feed/items/{itemId}/reaction", () => {
     expect((await reaction(member, "not-an-id", { reaction: "fire" })).status).toBe(400);
     expect((await reaction(member, crypto.randomUUID(), { reaction: "fire" })).status).toBe(404);
     expect((await reaction(member, stale, { reaction: "fire" })).status).toBe(404);
+    expect((await reaction(member, unreleased, { reaction: "fire" })).status).toBe(404);
     expect((await reaction(member, fresh, { reaction: "coffee" })).status).toBe(204);
   });
 });
@@ -251,7 +353,7 @@ describe("GET /v1/feed/stats", () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=60");
-    expect(await response.json()).toMatchObject({ windowHours: 72 });
+    expect(await response.json()).toMatchObject({ windowHours: 168 });
     expect(response.headers.get("etag")).toBeTruthy();
   });
 
@@ -262,8 +364,10 @@ describe("GET /v1/feed/stats", () => {
     for (const [i, driver] of drivers.slice(0, MINIMUM_DRIVERS - 1).entries()) {
       await seedDay(driver.id, "2031-03-10", [now - (i + 1) * HOUR]);
     }
-    expect(await communityStats(env, now)).toEqual({
-      windowHours: 72,
+    // The tenth driver's drive ended this quarter: not released, so not counted yet.
+    await seedDay(drivers[MINIMUM_DRIVERS - 1]?.id as string, "2031-03-11", [now]);
+    expect(await communityStats(env, feedClock(now))).toEqual({
+      windowHours: 168,
       visible: false,
       drivers: null,
       distanceM: null,
@@ -273,10 +377,10 @@ describe("GET /v1/feed/stats", () => {
     });
 
     await seedDay(drivers[MINIMUM_DRIVERS - 1]?.id as string, "2031-03-10", [now - HOUR, now - 2 * HOUR]);
-    // A drive outside the window counts for nothing.
-    await seedDay(drivers[0]?.id as string, "2031-03-06", [now - 73 * HOUR]);
-    expect(await communityStats(env, now)).toEqual({
-      windowHours: 72,
+    // A drive a quarter older than the window counts for nothing.
+    await seedDay(drivers[0]?.id as string, "2031-03-03", [feedClock(now).windowStart - QUARTER]);
+    expect(await communityStats(env, feedClock(now))).toEqual({
+      windowHours: 168,
       visible: true,
       drivers: MINIMUM_DRIVERS,
       distanceM: 11_000,

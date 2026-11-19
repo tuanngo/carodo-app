@@ -1,7 +1,8 @@
 import { writeEvent } from "../../lib/observability/analytics";
 import { isUuid } from "../../lib/platform/ids";
 import type { AccountCaller } from "../auth/sessions";
-import { refreshAfterPublish, refreshItemOfTrip } from "../feed/items";
+import { refreshAfterPublish, refreshItemOfTrip, VISIBLE } from "../feed/items";
+import { feedClock } from "../shared/coarse-time";
 import { integerIn } from "../shared/input";
 import { fail, ok, type Result } from "../shared/result";
 import type { DriveFields } from "./input";
@@ -10,12 +11,12 @@ import type { DriveFields } from "./input";
  * Publishing and unpublishing a car drive (contract `PUT`/`DELETE /v1/feed/drives/{tripId}`).
  * Arrival order means nothing (ADR 0007): a write is applied only with a higher revision than the
  * one stored, in one statement, so a late, older write and a retry both change nothing and still
- * succeed. Two exceptions, both from the contract: a drive Stop sharing took off comes back with a
- * republish at its unchanged revision; an unpublish keeps a tombstone with its revision for 30 days
- * (pruned by `prune.expired`), so only a higher revision publishes it again.
+ * succeed. An unpublish keeps a tombstone (its trip and revision, no summary) while the drive is in
+ * the Feed's window (pruned by `prune.expired`), so only a higher revision publishes it again. A
+ * drive already older than the window is answered as done and not stored (ADR 0007).
  *
  * A drive joins its author's item for its local day (`feed_items`), created on the first drive of
- * that day; the item's place in the Feed is refreshed in the same transaction.
+ * that day while sharing is on; the item's place in the Feed is refreshed in the same transaction.
  */
 
 /**
@@ -39,12 +40,16 @@ export async function publishDrive(
   now: number,
 ): Promise<Result<null>> {
   if (!caller.sharing) return fail("forbidden", "Sharing is off.", "sharing_off");
+  // Out of the Feed already: nothing to keep, and nothing for a later write to undo.
+  if (drive.endedAt < feedClock(now).windowStart) return ok(null);
 
   const db = env.DB;
-  // The day's item, made by the first drive of that day; its id is random (never derived).
+  // The day's item, made by the first drive of that day; its id is random (never derived). Only
+  // while sharing is on, so a refused publish leaves no row.
   const item = db
     .prepare(
-      `INSERT INTO feed_items (id, account_id, local_date, created_at) VALUES (?, ?, ?, ?)
+      `INSERT INTO feed_items (id, account_id, local_date, created_at)
+       SELECT ?1, ?2, ?3, ?4 WHERE (SELECT feed_opt_in FROM accounts WHERE id = ?2 AND deleted_at IS NULL) = 1
        ON CONFLICT (account_id, local_date) DO NOTHING`,
     )
     .bind(crypto.randomUUID(), caller.accountId, drive.localDate, now);
@@ -55,27 +60,25 @@ export async function publishDrive(
   const upsert = db
     .prepare(
       `INSERT INTO drives (trip_id, account_id, item_id, vehicle_make, vehicle_model, distance_m,
-         moving_duration_s, elapsed_duration_s, started_at, ended_at, drove_at, local_date,
-         local_start_hour, part_of_day, weather, shape, revision, published_at, updated_at)
-       SELECT ?1, ?2, (SELECT id FROM feed_items WHERE account_id = ?2 AND local_date = ?11), ?3, ?4, ?5,
-         ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17
+         moving_duration_s, elapsed_duration_s, ended_at, local_date, local_start_hour, part_of_day, weather,
+         shape, revision, published_at, updated_at)
+       SELECT ?1, ?2, (SELECT id FROM feed_items WHERE account_id = ?2 AND local_date = ?9), ?3, ?4, ?5,
+         ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15
        WHERE (SELECT feed_opt_in FROM accounts WHERE id = ?2 AND deleted_at IS NULL) = 1
          AND (SELECT count(*) FROM (
-           SELECT 1 FROM drives d WHERE d.account_id = ?2 AND d.local_date = ?11 AND d.trip_id <> ?1
-             AND d.hidden_at IS NULL AND d.unpublished_at IS NULL AND d.stopped_at IS NULL LIMIT ?18)) < ?18
+           SELECT 1 FROM drives d WHERE d.account_id = ?2 AND d.local_date = ?9 AND d.trip_id <> ?1
+             AND ${VISIBLE} LIMIT ?16)) < ?16
        ON CONFLICT (trip_id) DO UPDATE SET
          item_id = excluded.item_id, vehicle_make = excluded.vehicle_make,
          vehicle_model = excluded.vehicle_model, distance_m = excluded.distance_m,
          moving_duration_s = excluded.moving_duration_s, elapsed_duration_s = excluded.elapsed_duration_s,
-         started_at = excluded.started_at, ended_at = excluded.ended_at, drove_at = excluded.drove_at,
-         local_date = excluded.local_date, local_start_hour = excluded.local_start_hour,
-         part_of_day = excluded.part_of_day, weather = excluded.weather, shape = excluded.shape,
-         revision = excluded.revision, updated_at = excluded.updated_at,
+         ended_at = excluded.ended_at, local_date = excluded.local_date,
+         local_start_hour = excluded.local_start_hour, part_of_day = excluded.part_of_day,
+         weather = excluded.weather, shape = excluded.shape, revision = excluded.revision,
+         updated_at = excluded.updated_at,
          published_at = CASE WHEN drives.unpublished_at IS NULL THEN drives.published_at ELSE excluded.published_at END,
-         unpublished_at = NULL, stopped_at = NULL
-       WHERE drives.account_id = excluded.account_id
-         AND (excluded.revision > drives.revision
-           OR (excluded.revision = drives.revision AND drives.stopped_at IS NOT NULL AND drives.unpublished_at IS NULL))`,
+         unpublished_at = NULL
+       WHERE drives.account_id = excluded.account_id AND excluded.revision > drives.revision`,
     )
     .bind(
       tripId,
@@ -85,9 +88,7 @@ export async function publishDrive(
       drive.distanceM,
       drive.movingDurationS,
       drive.elapsedDurationS,
-      drive.startedAt,
       drive.endedAt,
-      drive.droveAt,
       drive.localDate,
       drive.localStartHour,
       drive.partOfDay,
@@ -121,8 +122,10 @@ export async function publishDrive(
 }
 
 /**
- * Takes a drive off the Feed. Without a row yet (the unpublish overtook its publish), it leaves a
- * tombstone, so the late publish with its lower revision is refused.
+ * Takes a drive off the Feed: its summary is cleared and only a tombstone is left (trip, revision,
+ * its quarter-hour end and local day, for pruning and its item's refresh). Without a row yet (the
+ * unpublish overtook its publish), it leaves one ending at this quarter, so the late publish with
+ * its lower revision is refused.
  */
 export async function unpublishDrive(
   env: Env,
@@ -139,18 +142,20 @@ export async function unpublishDrive(
   );
   if (!revision.ok) return revision;
 
-  // A tombstone carries no drive: zeros, no item (NULL) and an empty day, never shown.
+  // A tombstone carries no drive: zeros, no item, no car, shape or weather, never shown.
   const [unpublished] = await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO drives (trip_id, account_id, item_id, distance_m, moving_duration_s, elapsed_duration_s,
-         started_at, ended_at, drove_at, local_date, revision, published_at, updated_at, unpublished_at)
-       VALUES (?1, ?2, NULL, 0, 0, 0, 0, 0, 0, '', ?3, ?4, ?4, ?4)
+         ended_at, local_date, revision, published_at, updated_at, unpublished_at)
+       VALUES (?1, ?2, NULL, 0, 0, 0, ?5, '', ?3, ?4, ?4, ?4)
        ON CONFLICT (trip_id) DO UPDATE SET
+         item_id = NULL, vehicle_make = NULL, vehicle_model = NULL, distance_m = 0, moving_duration_s = 0,
+         elapsed_duration_s = 0, local_start_hour = NULL, part_of_day = NULL, weather = NULL, shape = NULL,
          revision = excluded.revision, updated_at = excluded.updated_at,
          unpublished_at = coalesce(drives.unpublished_at, excluded.unpublished_at)
        WHERE excluded.revision >= drives.revision AND drives.account_id = excluded.account_id`,
-    ).bind(tripId, caller.accountId, revision.data, now),
-    refreshItemOfTrip(env.DB, tripId),
+    ).bind(tripId, caller.accountId, revision.data, now, feedClock(now).quarter),
+    refreshItemOfTrip(env.DB, caller.accountId, tripId),
   ]);
   // Idempotent, and silent about another account's trip: the answer is the same either way.
   if (unpublished?.meta.changes === 1) writeEvent(env.EVENTS, "drive.unpublished");

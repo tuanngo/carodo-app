@@ -97,16 +97,17 @@ CREATE TABLE username_policies (
 -- ── Feed (ADR 0007: how, never where) ───────────────────────────────────────
 
 -- A car drive the person published to the Feed: its public summary, never a route or a place.
--- Times follow ADR 0007: when it happened comes from the device (started_at, ended_at, local_date,
--- local_start_hour, part_of_day), when the server learnt of it from the server (published_at,
--- updated_at). A change counts only with a higher revision; unpublishing keeps the row as a
--- tombstone (with its revision) for 30 days, so a late, older PUT cannot publish it again. Stop
--- sharing sets stopped_at: the drive leaves the Feed, and a republish at the same revision brings
--- it back. Account deletion and moderation set hidden_at. A drive is visible when all three are NULL.
+-- Times follow ADR 0007 and P9: when it happened comes from the device, already coarse (ended_at,
+-- local_date, local_start_hour, part_of_day); no exact time of a drive is ever received or kept.
+-- published_at, updated_at and unpublished_at are exact server times of what the server received:
+-- audit only, never in a response, never an order (owner, 2026-11-19). A change counts only with a
+-- higher revision; unpublishing keeps the row as a tombstone (trip and revision, no summary) while
+-- it is in the Feed's 7 days, so a late, older PUT cannot publish it again. Stop sharing and account
+-- deletion delete the rows; moderation sets hidden_at. A drive is visible when both are NULL.
 CREATE TABLE drives (
   trip_id       TEXT PRIMARY KEY,
   account_id    TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  -- Its Feed item: the author's local day. NULL for a tombstone that never had a drive.
+  -- Its Feed item: the author's local day. NULL for a tombstone.
   item_id       TEXT REFERENCES feed_items (id) ON DELETE CASCADE,
   vehicle_kind  TEXT NOT NULL DEFAULT 'car',          -- unused in Feed V1 (car drives only)
   vehicle_make  TEXT,
@@ -116,11 +117,9 @@ CREATE TABLE drives (
   elapsed_duration_s REAL NOT NULL,
   ranked        INTEGER NOT NULL DEFAULT 1,           -- unused in Feed V1
   tags          TEXT NOT NULL DEFAULT '[]',           -- unused in Feed V1
-  -- Times are kept exact for the server's own logic (the age, the busiest hour) and never leave
-  -- it: every time in a response goes through services/shared/coarse-time.ts (carodo-ios ADR 0007).
-  started_at    INTEGER NOT NULL,                     -- as the device sent it; never in a response
-  ended_at      INTEGER NOT NULL,                     -- as the device sent it; never in a response
-  drove_at      INTEGER NOT NULL,                     -- publicHour(started_at): the drive's age
+  -- The only time of a drive: its end as the device sent it, on a quarter hour (P9). Every time in
+  -- a response is computed from it in services/shared/coarse-time.ts (carodo-ios ADR 0007).
+  ended_at      INTEGER NOT NULL,
   local_date    TEXT NOT NULL,                        -- 'YYYY-MM-DD' in the drive's own zone: its item
   local_start_hour INTEGER,                           -- 0–23 local: only the busiest-hour statistic
   region_code   TEXT,                                 -- unused in Feed V1
@@ -132,32 +131,28 @@ CREATE TABLE drives (
   revision      INTEGER NOT NULL,                     -- the trip's revision on the device; only a higher one is applied
   published_at  INTEGER NOT NULL,                     -- server time of the first publish
   updated_at    INTEGER NOT NULL,                     -- server time of the last applied change
-  unpublished_at INTEGER,                             -- tombstone, pruned after 30 days
-  stopped_at    INTEGER,                              -- removed by Stop sharing
-  hidden_at     INTEGER                               -- account deletion, moderation
+  unpublished_at INTEGER,                             -- server time of the unpublish: a tombstone
+  hidden_at     INTEGER                               -- moderation
 );
 CREATE INDEX drives_on_item_id ON drives (item_id);              -- a Feed page's drives, an item's refresh
 CREATE INDEX drives_on_account_id ON drives (account_id, local_date);  -- Stop sharing, deletion, erase, the day's cap
--- Community numbers over 72 hours: the visible drives that ended in the window.
-CREATE INDEX drives_on_ended_at ON drives (ended_at)
-  WHERE hidden_at IS NULL AND unpublished_at IS NULL AND stopped_at IS NULL;
-CREATE INDEX drives_on_unpublished_at ON drives (unpublished_at) WHERE unpublished_at IS NOT NULL;  -- prune tombstones
+CREATE INDEX drives_on_ended_at ON drives (ended_at);  -- community numbers over the window; hourly deletion
 
 -- A Feed item: one person's car drives on one local day. Its id is random and kept for the item's
 -- life, also when a drive joins or leaves it, so its reactions stay on it; nothing links it to the
--- account in a response. sort_hour = publicHour(last_ended_at), the hour of its newest visible
--- drive's end; NULL when it has no visible drive (then it is not on the Feed).
+-- account in a response. last_ended_at is the ended_at of its newest visible drive; NULL when it has
+-- no visible drive (then it is not on the Feed). created_at is server time, never in a response.
 CREATE TABLE feed_items (
   id            TEXT PRIMARY KEY,
   account_id    TEXT NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
   local_date    TEXT NOT NULL,
-  sort_hour     INTEGER,
-  last_ended_at INTEGER,                              -- exact, never in a response
+  last_ended_at INTEGER,
   created_at    INTEGER NOT NULL,
   UNIQUE (account_id, local_date)                     -- a drive's item; refresh, Stop sharing, erase
 );
--- The Feed: newest first by hour, then by the random id, so the order tells no finer time (keyset pages).
-CREATE INDEX feed_items_on_feed ON feed_items (sort_hour DESC, id DESC) WHERE sort_hour IS NOT NULL;
+-- The Feed: newest first by quarter, then by the random id, so the order tells no finer time (keyset pages).
+CREATE INDEX feed_items_on_feed ON feed_items (last_ended_at DESC, id DESC) WHERE last_ended_at IS NOT NULL;
+CREATE INDEX feed_items_on_local_date ON feed_items (local_date);  -- hourly deletion
 
 -- One reaction per reader per item (contract Reaction: 'fire' | 'coffee' | 'clap' | 'road' | 'party').
 -- Who reacted is never returned, only the counts.

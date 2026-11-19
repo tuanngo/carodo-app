@@ -187,6 +187,36 @@ describe("prune.expired", () => {
     ).all();
     expect(holds.results).toEqual([{ name_hash: "held" }]);
   });
+
+  it("deletes drives, tombstones and items once they leave the 7-day Feed, reactions with them", async () => {
+    const now = Date.now();
+    const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const [gone, kept] = await Promise.all([seedDriver(), seedDriver()]);
+    const oldItem = await seedDay(gone.id, day(now - 11 * 24 * HOUR), [now - 169 * HOUR]);
+    const keptItem = await seedDay(kept.id, day(now - 8 * 24 * HOUR), [now - 167 * HOUR]);
+    const tombstones = [crypto.randomUUID(), crypto.randomUUID()];
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO drives (trip_id, account_id, distance_m, moving_duration_s, elapsed_duration_s, ended_at,
+           local_date, revision, published_at, updated_at, unpublished_at)
+         VALUES (?1, ?3, 0, 0, 0, ?4, '', 1, 0, 0, 0), (?2, ?3, 0, 0, 0, ?5, '', 1, 0, 0, 0)`,
+      ).bind(tombstones[0], tombstones[1], kept.id, now - 169 * HOUR, now - 167 * HOUR),
+      env.DB.prepare("INSERT INTO reactions (item_id, account_id, reaction, created_at) VALUES (?, ?, 'fire', 0)").bind(
+        oldItem,
+        kept.id,
+      ),
+    ]);
+
+    await runScheduled(env, now);
+
+    expect(await count("SELECT count(*) AS n FROM drives WHERE account_id = ?", gone.id)).toBe(0);
+    expect(await count("SELECT count(*) AS n FROM feed_items WHERE id = ?", oldItem)).toBe(0);
+    expect(await count("SELECT count(*) AS n FROM reactions WHERE item_id = ?", oldItem)).toBe(0);
+    expect(await count("SELECT count(*) AS n FROM drives WHERE trip_id = ?", tombstones[0])).toBe(0);
+    expect(await count("SELECT count(*) AS n FROM drives WHERE trip_id = ?", tombstones[1])).toBe(1);
+    expect(await count("SELECT count(*) AS n FROM drives WHERE item_id = ?", keptItem)).toBe(1);
+    expect(await count("SELECT count(*) AS n FROM feed_items WHERE id = ?", keptItem)).toBe(1);
+  });
 });
 
 describe("leases and history", () => {

@@ -1,13 +1,14 @@
-import { DAY_MS, HOUR_MS, MINUTE_MS } from "../../lib/time/units";
-import { publicHour } from "../shared/coarse-time";
+import { DAY_MS, MINUTE_MS } from "../../lib/time/units";
+import { isQuarter } from "../shared/coarse-time";
 import { instant, integerIn, isRecord, labelText, numberIn, localDate as parseLocalDate } from "../shared/input";
 import { fail, ok, type Result } from "../shared/result";
 
 /**
  * `DriveInput` (contract `PUT /v1/feed/drives/{tripId}`): what the Feed may know about one car
  * drive, never a route, a place or a speed (carodo-ios ADR 0007). Validated by hand (ADR 0003);
- * times checked as ADR 0007 says. Malformed is 400 (`validation`); well formed but implausible is
- * 422 (`start_time_invalid`, `out_of_range`, `geo_payload_rejected`).
+ * times checked as ADR 0007 says. Malformed is 400 (`validation`), and so is a time or a figure
+ * the device did not round (P9: the end to the quarter hour, durations to the minute, distance to
+ * 100 m); well formed but implausible is 422 (`start_time_invalid`, `out_of_range`, `geo_payload_rejected`).
  */
 
 export const PARTS_OF_DAY = ["early_morning", "morning", "midday", "afternoon", "evening", "night", "late_night"];
@@ -16,16 +17,13 @@ export const WEATHER = ["rain", "clear", "unknown"];
 /** The figures a drive may have (contract `DriveInput`). */
 export const RANGES = {
   distanceM: [100, 2_000_000],
-  elapsedDurationS: [30, 86_400],
+  elapsedDurationS: [60, 86_400],
 } as const;
 
 export interface DriveFields {
   revision: number;
-  /** As the device sent it: the server's own logic only, never in a response. */
-  startedAt: number;
+  /** The drive's end on a quarter hour, as the device sent it: the only time of a drive (P9). */
   endedAt: number;
-  /** publicHour(startedAt): the drive's age. */
-  droveAt: number;
   localDate: string;
   localStartHour: number;
   partOfDay: string;
@@ -74,10 +72,9 @@ export function parseDriveInput(body: unknown, now: number): Result<DriveFields>
 
   const revision = integerIn(body.revision, "revision", 1, Number.MAX_SAFE_INTEGER);
   if (!revision.ok) return revision;
-  const startedAt = instant(body.startedAt, "startedAt");
-  if (!startedAt.ok) return startedAt;
   const endedAt = instant(body.endedAt, "endedAt");
   if (!endedAt.ok) return endedAt;
+  if (!isQuarter(endedAt.data)) return fail("validation", "endedAt must be on a quarter hour.");
   const day = parseLocalDate(body.localDate, "localDate");
   if (!day.ok) return day;
   const hour = integerIn(body.localStartHour, "localStartHour", 0, 23);
@@ -97,16 +94,16 @@ export function parseDriveInput(body: unknown, now: number): Result<DriveFields>
   const shape = parseShape(body.shape);
   if (!shape.ok) return shape;
 
+  const rounded = checkRounding(distanceM.data, elapsed.data, moving.data);
+  if (!rounded.ok) return rounded;
   const range = checkRanges(distanceM.data, elapsed.data, moving.data);
   if (!range.ok) return range;
-  const time = checkTime(startedAt.data, endedAt.data, day.data, now);
+  const time = checkTime(endedAt.data, day.data, now);
   if (!time.ok) return time;
 
   return ok({
     revision: revision.data,
-    startedAt: startedAt.data,
     endedAt: endedAt.data,
-    droveAt: publicHour(startedAt.data),
     localDate: day.data,
     localStartHour: hour.data,
     partOfDay: body.partOfDay as string,
@@ -119,6 +116,14 @@ export function parseDriveInput(body: unknown, now: number): Result<DriveFields>
   });
 }
 
+/** P9: durations in whole minutes, distance in whole 100 m, as the device rounds them. */
+function checkRounding(distanceM: number, elapsedS: number, movingS: number): Result<null> {
+  if (distanceM % 100 !== 0) return fail("validation", "distanceM must be a multiple of 100.");
+  if (elapsedS % 60 !== 0) return fail("validation", "elapsedDurationS must be a multiple of 60.");
+  if (movingS % 60 !== 0) return fail("validation", "movingDurationS must be a multiple of 60.");
+  return ok(null);
+}
+
 function checkRanges(distanceM: number, elapsedS: number, movingS: number): Result<null> {
   const [minDistance, maxDistance] = RANGES.distanceM;
   const [minElapsed, maxElapsed] = RANGES.elapsedDurationS;
@@ -128,29 +133,24 @@ function checkRanges(distanceM: number, elapsedS: number, movingS: number): Resu
   if (elapsedS < minElapsed || elapsedS > maxElapsed) {
     return fail("unprocessable", `elapsedDurationS must be between ${minElapsed} and ${maxElapsed}.`, "out_of_range");
   }
-  if (movingS > elapsedS + 1) {
+  if (movingS > elapsedS) {
     return fail("unprocessable", "movingDurationS cannot be longer than elapsedDurationS.", "out_of_range");
   }
   return ok(null);
 }
 
 /**
- * ADR 0007: not ahead of the server, not over a year old, within a day of its own local date; it
- * ends after it starts, at most 24 hours later, and not ahead of the server either.
+ * ADR 0007: the end at most a quarter hour ahead of the server (a clock a little fast), and its UTC
+ * date within two days of the local day it started (a drive of up to 24 hours, in a zone up to 14
+ * hours from UTC). How old it may be is the Feed window's rule, applied when it is published.
  */
-export function checkTime(startedAt: number, endedAt: number, day: string, now: number): Result<null> {
+export function checkTime(endedAt: number, day: string, now: number): Result<null> {
   const reason = "start_time_invalid";
-  if (startedAt > now + 5 * MINUTE_MS) return fail("unprocessable", "startedAt is in the future.", reason);
-  if (startedAt < now - 366 * DAY_MS) return fail("unprocessable", "startedAt is more than a year old.", reason);
-  if (endedAt <= startedAt || endedAt - startedAt > 24 * HOUR_MS) {
-    return fail("unprocessable", "endedAt must be after startedAt and at most 24 hours later.", reason);
-  }
-  if (endedAt > now + 5 * MINUTE_MS) return fail("unprocessable", "endedAt is in the future.", reason);
-  // No time zone is more than 14 hours from UTC, so the local day is the UTC day or one beside it.
-  const utcDay = Date.parse(`${new Date(startedAt).toISOString().slice(0, 10)}T00:00:00Z`);
+  if (endedAt > now + 15 * MINUTE_MS) return fail("unprocessable", "endedAt is in the future.", reason);
+  const utcDay = Date.parse(`${new Date(endedAt).toISOString().slice(0, 10)}T00:00:00Z`);
   const localDay = Date.parse(`${day}T00:00:00Z`);
-  if (Math.abs(localDay - utcDay) > DAY_MS) {
-    return fail("unprocessable", "localDate is more than a day from startedAt.", reason);
+  if (Math.abs(utcDay - localDay) > 2 * DAY_MS) {
+    return fail("unprocessable", "localDate is more than two days from endedAt.", reason);
   }
   return ok(null);
 }

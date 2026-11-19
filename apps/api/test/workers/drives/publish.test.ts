@@ -1,19 +1,17 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { MAX_DRIVES_PER_DAY } from "../../../src/services/drives/publish";
-import { pruneExpired } from "../../../src/services/jobs/prune";
 import { claimedAccount, type TestAccount } from "../../support/app-client.ts";
 import { driveInput } from "../../support/drives.ts";
 
 const HOUR = 60 * 60 * 1000;
+const QUARTER = 15 * 60 * 1000;
 
 interface DriveRow {
   account_id: string;
   item_id: string;
   revision: number;
   distance_m: number;
-  drove_at: number;
-  started_at: number;
   ended_at: number;
   local_date: string;
   local_start_hour: number;
@@ -22,7 +20,6 @@ interface DriveRow {
   published_at: number;
   updated_at: number;
   unpublished_at: number | null;
-  stopped_at: number | null;
   vehicle_model: string | null;
 }
 
@@ -33,7 +30,7 @@ async function row(tripId: string): Promise<DriveRow | null> {
 async function item(id: string) {
   return env.DB.prepare("SELECT * FROM feed_items WHERE id = ?")
     .bind(id)
-    .first<{ account_id: string; local_date: string; sort_hour: number | null; last_ended_at: number | null }>();
+    .first<{ account_id: string; local_date: string; last_ended_at: number | null }>();
 }
 
 const put = (account: TestAccount, tripId: string, body: unknown) =>
@@ -44,36 +41,47 @@ const sharing = (account: TestAccount, on: boolean) =>
   account.send("PUT", "/v1/me/sharing", { sharing: on, displayAs: "username", showVehicle: true });
 
 describe("PUT /v1/feed/drives/{tripId}", () => {
-  it("publishes the summary into its day's item, with the start's hour and the end's hour for the order", async () => {
+  it("publishes the summary into its day's item, with the quarter-hour end as the only time", async () => {
     const account = await claimedAccount(env.APP_ID);
     const tripId = crypto.randomUUID();
     const body = driveInput({ endedAgoMs: 2 * HOUR }, { weather: "rain" });
+    const before = Date.now();
     expect((await put(account, tripId.toUpperCase(), body)).status).toBe(204);
 
     const stored = await row(tripId);
+    const endedAt = Date.parse(body.endedAt as string);
     expect(stored).toMatchObject({
       account_id: account.accountId,
       revision: 1,
       distance_m: 12_000,
-      started_at: Date.parse(body.startedAt as string),
-      ended_at: Date.parse(body.endedAt as string),
+      ended_at: endedAt,
       local_date: body.localDate,
       local_start_hour: body.localStartHour,
       weather: "rain",
-      stopped_at: null,
     });
+    expect(endedAt % QUARTER).toBe(0);
     expect(JSON.parse(stored?.shape ?? "null")).toEqual(body.shape);
-    expect((stored?.drove_at ?? 1) % HOUR).toBe(0);
+    // Audit times are the server's own, exact (owner, 2026-11-19).
+    expect(stored?.published_at).toBeGreaterThanOrEqual(before);
     expect(stored?.published_at).toBe(stored?.updated_at);
 
-    const day = await item(stored?.item_id ?? "");
-    const endedAt = stored?.ended_at ?? 0;
-    expect(day).toMatchObject({
+    expect(await item(stored?.item_id ?? "")).toMatchObject({
       account_id: account.accountId,
       local_date: body.localDate,
       last_ended_at: endedAt,
-      sort_hour: endedAt - (endedAt % HOUR),
     });
+  });
+
+  it("answers a drive already out of the 7-day Feed as done, and keeps nothing of it", async () => {
+    const account = await claimedAccount(env.APP_ID);
+    const tripId = crypto.randomUUID();
+    const old = driveInput({ endedAgoMs: 169 * HOUR, durationMin: 25 });
+    expect((await put(account, tripId, old)).status).toBe(204);
+    expect(await row(tripId)).toBeNull();
+    const items = await env.DB.prepare("SELECT count(*) AS n FROM feed_items WHERE account_id = ?")
+      .bind(account.accountId)
+      .first<{ n: number }>();
+    expect(items?.n).toBe(0);
   });
 
   it("keeps one item per person and local day, with a random id that a joining drive keeps", async () => {
@@ -124,17 +132,22 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     });
   });
 
-  it("refuses a drive while sharing is off, a future start, a place, and another account's trip", async () => {
+  it("refuses a drive while sharing is off, a future end, a place, and another account's trip", async () => {
     const quiet = await claimedAccount(env.APP_ID, { sharing: false });
     const refused = await put(quiet, crypto.randomUUID(), driveInput());
     expect(refused.status).toBe(403);
     expect(await refused.json()).toMatchObject({ code: "sharing_off" });
+    const quietItems = await env.DB.prepare("SELECT count(*) AS n FROM feed_items WHERE account_id = ?")
+      .bind(quiet.accountId)
+      .first<{ n: number }>();
+    expect(quietItems?.n).toBe(0);
 
     const account = await claimedAccount(env.APP_ID);
+    const now = Date.now();
     const future = await put(
       account,
       crypto.randomUUID(),
-      driveInput({}, { startedAt: new Date(Date.now() + HOUR).toISOString() }),
+      driveInput({}, { endedAt: new Date(now - (now % QUARTER) + 2 * QUARTER).toISOString() }),
     );
     expect(future.status).toBe(422);
     expect(await future.json()).toMatchObject({ code: "start_time_invalid" });
@@ -143,7 +156,7 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     expect(placed.status).toBe(422);
     expect(await placed.json()).toMatchObject({ code: "geo_payload_rejected" });
 
-    const short = await put(account, crypto.randomUUID(), driveInput({ distanceM: 50 }));
+    const short = await put(account, crypto.randomUUID(), driveInput({ distanceM: 0 }));
     expect(short.status).toBe(422);
     expect(await short.json()).toMatchObject({ code: "out_of_range" });
 
@@ -163,12 +176,13 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
     const itemId = (await row(kept))?.item_id;
     await env.DB.prepare(
       `INSERT INTO drives (trip_id, account_id, item_id, distance_m, moving_duration_s, elapsed_duration_s,
-         started_at, ended_at, drove_at, local_date, revision, published_at, updated_at)
-       SELECT value, ?, ?, 1000, 60, 60, 0, 0, 0, ?, 1, 0, 0 FROM json_each(?)`,
+         ended_at, local_date, revision, published_at, updated_at)
+       SELECT value, ?, ?, 1000, 60, 60, ?, ?, 1, 0, 0 FROM json_each(?)`,
     )
       .bind(
         account.accountId,
         itemId,
+        Date.parse(body.endedAt as string),
         body.localDate,
         JSON.stringify(Array.from({ length: MAX_DRIVES_PER_DAY - 1 }, () => crypto.randomUUID())),
       )
@@ -208,29 +222,38 @@ describe("PUT /v1/feed/drives/{tripId}", () => {
 });
 
 describe("Stop sharing (PUT /v1/me/sharing)", () => {
-  it("takes every drive off the Feed; a republish at the same revision brings it back once on", async () => {
+  it("deletes the account's drives and items with their reactions; a hidden drive's tombstone stays", async () => {
     const account = await claimedAccount(env.APP_ID);
     const [kept, hid] = [crypto.randomUUID(), crypto.randomUUID()];
     await put(account, kept, driveInput({ revision: 4 }));
     await put(account, hid, driveInput({ revision: 2 }));
     expect((await unpublish(account, hid, 2)).status).toBe(204);
     const itemId = (await row(kept))?.item_id as string;
+    const reader = await claimedAccount(env.APP_ID);
+    await env.DB.prepare("INSERT INTO reactions (item_id, account_id, reaction, created_at) VALUES (?, ?, 'fire', 0)")
+      .bind(itemId, reader.accountId)
+      .run();
 
     expect((await sharing(account, false)).status).toBe(200);
-    expect((await row(kept))?.stopped_at).not.toBeNull();
-    expect((await item(itemId))?.sort_hour).toBeNull();
+    expect(await row(kept)).toBeNull();
+    expect(await item(itemId)).toBeNull();
+    const reactions = await env.DB.prepare("SELECT count(*) AS n FROM reactions WHERE item_id = ?")
+      .bind(itemId)
+      .first<{ n: number }>();
+    expect(reactions?.n).toBe(0);
+    expect((await row(hid))?.unpublished_at).not.toBeNull();
     // While off, nothing is published.
     expect((await put(account, kept, driveInput({ revision: 4 }))).status).toBe(403);
 
     expect((await sharing(account, true)).status).toBe(200);
-    // On again, the drives stay off until the app republishes them.
-    expect((await item(itemId))?.sort_hour).toBeNull();
-    expect((await put(account, kept, driveInput({ revision: 4 }))).status).toBe(204);
-    expect(await row(kept)).toMatchObject({ revision: 4, stopped_at: null });
-    expect((await item(itemId))?.sort_hour).not.toBeNull();
-    // A drive the person hid keeps its tombstone: the same revision does not show it.
-    expect((await put(account, hid, driveInput({ revision: 2 }))).status).toBe(204);
+    // On again, nothing comes back by itself; a late, older or equal publish of the hidden drive
+    // is still refused.
+    expect(await row(kept)).toBeNull();
+    for (const revision of [1, 2]) expect((await put(account, hid, driveInput({ revision }))).status).toBe(204);
     expect((await row(hid))?.unpublished_at).not.toBeNull();
+    // A republish is a new drive in a new item.
+    expect((await put(account, kept, driveInput({ revision: 4 }))).status).toBe(204);
+    expect((await row(kept))?.item_id).not.toBe(itemId);
   });
 });
 
@@ -240,16 +263,26 @@ describe("DELETE /v1/feed/drives/{tripId} (late arrivals, ADR 0007)", () => {
     const tripId = crypto.randomUUID();
     await put(account, tripId, driveInput({ revision: 2 }));
     const itemId = (await row(tripId))?.item_id as string;
+    const ended = (await row(tripId))?.ended_at;
     expect((await unpublish(account, tripId, 2)).status).toBe(204);
+    // Only a tombstone is left: no summary, no item, its end kept for the hourly deletion.
+    expect(await row(tripId)).toMatchObject({
+      distance_m: 0,
+      item_id: null,
+      vehicle_model: null,
+      shape: null,
+      weather: null,
+      ended_at: ended,
+    });
     expect((await row(tripId))?.unpublished_at).not.toBeNull();
-    expect((await item(itemId))?.sort_hour).toBeNull();
+    expect((await item(itemId))?.last_ended_at).toBeNull();
 
     for (const revision of [1, 2]) expect((await put(account, tripId, driveInput({ revision }))).status).toBe(204);
     expect((await row(tripId))?.unpublished_at).not.toBeNull();
 
     expect((await put(account, tripId, driveInput({ revision: 3 }))).status).toBe(204);
-    expect(await row(tripId)).toMatchObject({ revision: 3, unpublished_at: null });
-    expect((await item(itemId))?.sort_hour).not.toBeNull();
+    expect(await row(tripId)).toMatchObject({ revision: 3, unpublished_at: null, item_id: itemId });
+    expect((await item(itemId))?.last_ended_at).not.toBeNull();
   });
 
   it("leaves a tombstone when the unpublish overtakes its publish", async () => {
@@ -259,6 +292,10 @@ describe("DELETE /v1/feed/drives/{tripId} (late arrivals, ADR 0007)", () => {
     expect((await put(account, tripId, driveInput({ revision: 4 }))).status).toBe(204);
     expect(await row(tripId)).toMatchObject({ revision: 5, distance_m: 0, item_id: null });
     expect((await row(tripId))?.unpublished_at).not.toBeNull();
+    // It ends at the quarter it arrived in, so it leaves with the window.
+    const ended = (await row(tripId))?.ended_at ?? 1;
+    expect(ended % QUARTER).toBe(0);
+    expect(Date.now() - ended).toBeLessThan(QUARTER + 60_000);
   });
 
   it("is silent about another account's trip and changes nothing", async () => {
@@ -273,16 +310,5 @@ describe("DELETE /v1/feed/drives/{tripId} (late arrivals, ADR 0007)", () => {
   it("needs a revision", async () => {
     const account = await claimedAccount(env.APP_ID);
     expect((await account.send("DELETE", `/v1/feed/drives/${crypto.randomUUID()}`)).status).toBe(400);
-  });
-
-  it("keeps a tombstone 30 days, then prunes it", async () => {
-    const account = await claimedAccount(env.APP_ID);
-    const tripId = crypto.randomUUID();
-    await unpublish(account, tripId, 1);
-    const day = 24 * HOUR;
-    await pruneExpired(env.DB, Date.now() + 29 * day);
-    expect(await row(tripId)).not.toBeNull();
-    await pruneExpired(env.DB, Date.now() + 31 * day);
-    expect(await row(tripId)).toBeNull();
   });
 });

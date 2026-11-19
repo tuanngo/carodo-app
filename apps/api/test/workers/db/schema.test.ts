@@ -44,6 +44,25 @@ describe("baseline migration", () => {
     expect(checked.map((table) => table.name)).toEqual(["job_runs"]);
   });
 
+  it("keeps no exact time of a drive", async () => {
+    const columns = async (table: string) =>
+      (await env.DB.prepare(`SELECT name FROM pragma_table_info('${table}')`).all<{ name: string }>()).results.map(
+        (column) => column.name,
+      );
+    const drives = await columns("drives");
+    expect(drives).toEqual(
+      expect.arrayContaining(["ended_at", "published_at", "updated_at", "unpublished_at", "hidden_at"]),
+    );
+    for (const gone of ["started_at", "drove_at", "stopped_at"]) expect(drives).not.toContain(gone);
+    const items = await columns("feed_items");
+    expect(items).toContain("last_ended_at");
+    expect(items).not.toContain("sort_hour");
+    const feed = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE name = 'feed_items_on_feed'").first<{
+      sql: string;
+    }>();
+    expect(feed?.sql).toContain("last_ended_at DESC, id DESC");
+  });
+
   it("has the seeded username policies", async () => {
     const row = await env.DB.prepare("SELECT kind, match FROM username_policies WHERE name = 'ditme'").first();
     expect(row).toEqual({ kind: "profane", match: "contains" });

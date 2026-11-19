@@ -1,4 +1,6 @@
-import { DAY_MS } from "../../lib/time/units";
+import { DAY_MS, HOUR_MS } from "../../lib/time/units";
+import { oldestFeedDay } from "../feed/items";
+import { FEED_WINDOW_MS } from "../shared/coarse-time";
 
 /**
  * Rows whose time is up. Each table is pruned through the index named beside it in the baseline,
@@ -13,10 +15,12 @@ interface PruneTarget {
   table: string;
   /** The key a batch selects (the primary key). */
   key: string;
-  /** The indexed instant column compared with now. */
+  /** The indexed column compared with the cutoff: an instant, or a local day ('YYYY-MM-DD'). */
   column: string;
   /** How long a row is kept past that instant (0: pruned when it is reached). */
   keepMs?: number;
+  /** Instead of `now − keepMs`: the cutoff a row's column is at or before when it goes. */
+  cutoff?: (now: number) => number | string;
   /** Why this table is read whole, for a table kept small without an index on `column` (cost C1). */
   fullScan?: string;
 }
@@ -30,21 +34,30 @@ const TARGETS: PruneTarget[] = [
   { table: "sessions", key: "id", column: "expires_at" },
   // Username changes count toward the limit for 30 days (PUT /v1/me/profile).
   { table: "username_changes", key: "id", column: "changed_at", keepMs: 30 * DAY_MS },
-  // Unpublished drives keep a tombstone 30 days, so a late older publish is refused (ADR 0007).
-  { table: "drives", key: "trip_id", column: "unpublished_at", keepMs: 30 * DAY_MS },
+  // The Feed deletes itself (P9, ADR 0007): a drive, or an unpublished drive's tombstone, an hour
+  // after it left the 7 days; a tombstone is useless by then, since an older drive is not stored.
+  { table: "drives", key: "trip_id", column: "ended_at", keepMs: FEED_WINDOW_MS + HOUR_MS },
+  // Then the items too old to hold a drive in the window (their reactions cascade); after drives
+  // in the batch, so no drive points at a deleted item.
+  {
+    table: "feed_items",
+    key: "id",
+    column: "local_date",
+    cutoff: (now) => new Date(Date.parse(`${oldestFeedDay(now)}T00:00:00Z`) - DAY_MS).toISOString().slice(0, 10),
+  },
 ];
 
 export type PruneCounts = Record<string, number>;
 
 export async function pruneExpired(db: D1Database, now: number): Promise<PruneCounts> {
   const results = await db.batch(
-    TARGETS.map(({ table, key, column, keepMs = 0, fullScan }) =>
+    TARGETS.map(({ table, key, column, keepMs = 0, cutoff, fullScan }) =>
       db
         .prepare(
           `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE ${column} <= ? LIMIT ${BATCH})` +
             (fullScan === undefined ? "" : ` -- full scan: ${fullScan}`),
         )
-        .bind(now - keepMs),
+        .bind(cutoff ? cutoff(now) : now - keepMs),
     ),
   );
   return Object.fromEntries(TARGETS.map(({ table }, i) => [table, results[i]?.meta.changes ?? 0]));

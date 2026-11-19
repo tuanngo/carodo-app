@@ -1,15 +1,14 @@
 import { writeEvent } from "../../lib/observability/analytics";
 import type { AccountCaller } from "../auth/sessions";
-import { refreshItemsOf } from "../feed/items";
 import { isRecord } from "../shared/input";
 import { fail, ok, type Result } from "../shared/result";
 
 /**
  * How an account appears on the Feed (contract `Sharing`, carodo-ios ADR 0008). `displayAs` and
- * `showVehicle` apply when items are read, so a change reaches past items too. Stop sharing takes
- * every published drive off the Feed (`stopped_at`); a republish of the same drive at its unchanged
- * revision, once sharing is on again, brings it back (drives/publish.ts). A drive the person hid
- * keeps its own tombstone through both.
+ * `showVehicle` apply when items are read, so a change reaches past items too. Stop sharing deletes
+ * every published drive and item of the account (their reactions with them); Start sharing brings
+ * none back (no backfill, ADR 0008). A drive the person hid keeps its tombstone through both, so a
+ * late, older publish of it is still refused.
  */
 
 export const DISPLAY_AS = ["anonymous", "username"] as const;
@@ -58,7 +57,7 @@ export async function readSharing(env: Env, caller: AccountCaller): Promise<Resu
   return ok(sharingOf(row));
 }
 
-/** Stores the choices; turning sharing off takes every drive off the Feed in the same transaction. */
+/** Stores the choices; turning sharing off deletes the account's Feed in the same transaction. */
 export async function updateSharing(
   env: Env,
   caller: AccountCaller,
@@ -71,11 +70,9 @@ export async function updateSharing(
   const stop = sharing.sharing
     ? []
     : [
-        env.DB.prepare(
-          `UPDATE drives SET stopped_at = ?, updated_at = ?
-           WHERE account_id = ? AND stopped_at IS NULL AND unpublished_at IS NULL AND hidden_at IS NULL`,
-        ).bind(now, now, caller.accountId),
-        ...refreshItemsOf(env.DB, caller.accountId),
+        env.DB.prepare("DELETE FROM drives WHERE account_id = ? AND unpublished_at IS NULL").bind(caller.accountId),
+        // Tombstones have no item, so the cascade to drives leaves them.
+        env.DB.prepare("DELETE FROM feed_items WHERE account_id = ?").bind(caller.accountId),
       ];
   const [updated] = await env.DB.batch([update, ...stop]);
   if (updated?.meta.changes !== 1) return fail("unauthorized", "The account no longer exists.");
