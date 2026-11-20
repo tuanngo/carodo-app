@@ -55,6 +55,10 @@ tasks:
     desc: Upsert the username policies (apps/api/seeds) into production's D1; deploy runs it too
     cmds: [pnpm run db:policies:production]
 
+  db:reset:staging:
+    desc: 'Drop every table of staging''s D1, then the migrations from scratch and the seeds (pre-release; loses all staging data): `task db:reset:staging -- --yes`'
+    cmds: ['node scripts/d1-reset-staging.mjs {{.CLI_ARGS}}']
+
   db:migrate:staging:
     desc: Apply the D1 migrations to staging's database (`carodo-staging`)
     cmds: [pnpm run db:migrate:staging]

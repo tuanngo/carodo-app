@@ -87,6 +87,16 @@ that is not there), then the web (the web's `API` service binding targets the ap
 in the setup step first; if Wrangler asks to create or select another database, stop and verify
 `.env.deploy` and the database name.
 
+Only the api, when nothing else changed (no migration, seed, video or web change):
+`task check`, then `task wrangler:staging -- api deploy` (or `production`).
+
+**Staging's D1 from scratch (pre-release).** While `0001_baseline.sql` is edited in place, staging
+has recorded it as applied and never picks up the edit. `task db:reset:staging -- --yes` drops every
+table (`d1_migrations` too), applies the migrations from scratch and upserts the seeds: every
+account, session and drive on staging is lost (D1 Time Travel keeps 30 days). Then sign in again
+from the app (a claimed account is gone; the app claims a new one). There is no such task for
+production: from the first TestFlight build, migrations are additive.
+
 Smoke test and logs:
 
 ```sh
