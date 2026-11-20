@@ -39,10 +39,22 @@ const AAGUID_PRODUCTION = concat(utf8("appattest"), new Uint8Array(7));
 /** Validation categories an app of ours can carry: TestFlight, development-signed, App Store. */
 const ACCEPTED_CATEGORIES = new Set([2, 3, 4]);
 
-class Refusal extends Error {}
+/**
+ * Why a proof was refused: a fixed reason, and for a field Apple writes, what was found in a form
+ * that tells nothing of the request (a CBOR type and length, a small number), so a change in what
+ * devices send shows in the log at once (P5, C13).
+ */
+export class Refusal extends Error {
+  constructor(
+    reason: string,
+    readonly found?: string | number,
+  ) {
+    super(reason);
+  }
+}
 
-function refuse(reason: string): never {
-  throw new Refusal(reason);
+function refuse(reason: string, found?: string | number): never {
+  throw new Refusal(reason, found);
 }
 
 export async function verifyAttestation(
@@ -65,7 +77,10 @@ export async function verifyAttestation(
     refuse("fmt");
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
-    logEvent("warn", "attest.attestation_refused", { reason: error.message });
+    logEvent("warn", "attest.attestation_refused", {
+      reason: error.message,
+      ...(error.found === undefined ? {} : { found: error.found }),
+    });
     return fail("unauthorized", "The attestation is not valid.");
   }
 }
@@ -111,8 +126,7 @@ async function verifyApple(
       : refuse("aaguid");
   if (!policy.environments.has(environment)) refuse(`environment ${environment}`);
   if (!bytesEqual(data.credentialId, input.keyId)) refuse("credential id");
-  const category = validationCategory(mapGet(data.extensions, "apple_validation_category_01"));
-  if (category !== undefined && !ACCEPTED_CATEGORIES.has(category)) refuse("validation category");
+  validationCategory(mapGet(data.extensions, "apple_validation_category_01"));
 
   return { keyId: toBase64(keyHash), publicKey: leaf.publicKey, environment };
 }
@@ -124,8 +138,20 @@ async function verifyApple(
  */
 function validationCategory(value: CborValue | undefined): number | undefined {
   if (value === undefined) return undefined;
-  if (!(value instanceof Uint8Array) || value.length !== 4) return refuse("validation category");
-  return new DataView(value.buffer, value.byteOffset, 4).getUint32(0, true);
+  if (!(value instanceof Uint8Array) || value.length !== 4) return refuse("validation category", cborShape(value));
+  const category = new DataView(value.buffer, value.byteOffset, 4).getUint32(0, true);
+  if (!ACCEPTED_CATEGORIES.has(category)) refuse("validation category", category < 256 ? category : "over 255");
+  return category;
+}
+
+/** A value's CBOR type and size, never its content: "bytes 8", "integer", "text 4". */
+function cborShape(value: CborValue): string {
+  if (value instanceof Uint8Array) return `bytes ${value.length}`;
+  if (typeof value === "number") return "integer";
+  if (typeof value === "string") return `text ${value.length}`;
+  if (Array.isArray(value)) return `array ${value.length}`;
+  if (value instanceof Map) return `map ${value.size}`;
+  return value === null ? "null" : typeof value;
 }
 
 /** `carodo-debug`: a software P-256 key that signs `clientDataHash` (docs/sync.md "Development"). */
@@ -252,5 +278,3 @@ function bytesOf(value: CborValue | undefined, what: string): Bytes {
   if (!(value instanceof Uint8Array)) refuse(what);
   return value;
 }
-
-export { Refusal };

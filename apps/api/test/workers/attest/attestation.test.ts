@@ -122,6 +122,19 @@ describe("apple-appattest", () => {
     expect(result).toMatchObject({ ok: false });
   });
 
+  it("logs the category it refused, or how it was written, so a new iOS shows at once", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await attest({ extensions: new Map([["apple_validation_category_01", category(5)]]) });
+      await attest({ extensions: new Map([["apple_validation_category_01", 3]]) });
+      await attest({ extensions: new Map([["apple_validation_category_01", new Uint8Array(8)]]) });
+      const found = warn.mock.calls.map((call) => JSON.parse(String(call[0])).found);
+      expect(found).toEqual([5, "integer", "bytes 8"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("logs a fixed reason for an unknown format, never the format the request sent", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
