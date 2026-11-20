@@ -39,6 +39,13 @@ async function attest(overrides: Partial<AttestationOptions> = {}, policyOverrid
   return { made, result };
 }
 
+/** `apple_validation_category_01` as iOS 27 writes it: 4 bytes, little-endian. */
+function category(value: number): Uint8Array {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value, true);
+  return bytes;
+}
+
 describe("apple-appattest", () => {
   it("accepts a valid attestation and returns the key", async () => {
     const { made, result } = await attest();
@@ -48,9 +55,25 @@ describe("apple-appattest", () => {
     });
   });
 
+  it("accepts a development build's extensions as iOS 27 writes them", async () => {
+    const { result } = await attest({
+      extensions: new Map<string, string | Uint8Array>([
+        ["apple_bundle_version_01", "1"],
+        ["apple_validation_category_01", category(3)],
+      ]),
+    });
+    expect(result).toMatchObject({ ok: true, data: { environment: "development" } });
+  });
+
   it("reads the production environment and Apple's extensions", async () => {
     const { result } = await attest(
-      { environment: "production", extensions: new Map([["apple_validation_category_01", 4]]) },
+      {
+        environment: "production",
+        extensions: new Map<string, string | Uint8Array>([
+          ["apple_bundle_version_01", "1"],
+          ["apple_validation_category_01", category(4)],
+        ]),
+      },
       { environments: new Set(["production"]) },
     );
     expect(result).toMatchObject({ ok: true, data: { environment: "production" } });
@@ -64,7 +87,8 @@ describe("apple-appattest", () => {
     ["an unknown aaguid", { aaguid: new Uint8Array(16) }],
     ["a credential id that is not the key id", { credentialId: new Uint8Array(32) }],
     ["an expired credential certificate", { leafNotAfter: NOW - 1 }],
-    ["an ad-hoc build", { extensions: new Map([["apple_validation_category_01", 5]]) }],
+    ["an ad-hoc build", { extensions: new Map([["apple_validation_category_01", category(5)]]) }],
+    ["a category not written as 4 bytes", { extensions: new Map([["apple_validation_category_01", 3]]) }],
   ];
   for (const [what, overrides, policyOverrides] of refusals) {
     it(`refuses ${what}`, async () => {

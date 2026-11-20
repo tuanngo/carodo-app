@@ -111,12 +111,21 @@ async function verifyApple(
       : refuse("aaguid");
   if (!policy.environments.has(environment)) refuse(`environment ${environment}`);
   if (!bytesEqual(data.credentialId, input.keyId)) refuse("credential id");
-  const category = mapGet(data.extensions, "apple_validation_category_01");
-  if (category !== undefined && !(typeof category === "number" && ACCEPTED_CATEGORIES.has(category))) {
-    refuse("validation category");
-  }
+  const category = validationCategory(mapGet(data.extensions, "apple_validation_category_01"));
+  if (category !== undefined && !ACCEPTED_CATEGORIES.has(category)) refuse("validation category");
 
   return { keyId: toBase64(keyHash), publicKey: leaf.publicKey, environment };
+}
+
+/**
+ * `apple_validation_category_01`, which iOS 27 writes in the authenticator data's extensions: a
+ * 4-byte string holding a little-endian unsigned integer (a development-signed build sends
+ * `03 00 00 00`). Undefined when absent (older iOS); anything else refuses.
+ */
+function validationCategory(value: CborValue | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!(value instanceof Uint8Array) || value.length !== 4) return refuse("validation category");
+  return new DataView(value.buffer, value.byteOffset, 4).getUint32(0, true);
 }
 
 /** `carodo-debug`: a software P-256 key that signs `clientDataHash` (docs/sync.md "Development"). */

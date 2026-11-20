@@ -128,7 +128,7 @@ export interface AttestationOptions {
   nonce?: Uint8Array;
   credentialId?: Uint8Array;
   leafNotAfter?: number;
-  extensions?: Map<string, number | string>;
+  extensions?: Map<string, number | string | Uint8Array>;
 }
 
 /** An `apple-appattest` attestation of a fresh P-256 key, laid out as Apple's. */
