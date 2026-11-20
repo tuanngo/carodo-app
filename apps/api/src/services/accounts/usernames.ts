@@ -1,5 +1,5 @@
 import { deriveHmacKey, LABEL_USERNAME_HOLD } from "../../lib/crypto/secret-key";
-import { utf8 } from "../../lib/encoding/bytes";
+import { toHex, utf8 } from "../../lib/encoding/bytes";
 import { DAY_MS } from "../../lib/time/units";
 import { fail, ok, type Result } from "../shared/result";
 
@@ -119,7 +119,7 @@ export async function usernameHoldHash(root: string, username: string): Promise<
     await deriveHmacKey(root, LABEL_USERNAME_HOLD),
     utf8(username.toLowerCase()),
   );
-  return Array.from(new Uint8Array(mac), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return toHex(new Uint8Array(mac));
 }
 
 /** Whether a deleted or renamed account's name is still held. */

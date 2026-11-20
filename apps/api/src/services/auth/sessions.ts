@@ -1,5 +1,5 @@
 import { LABEL_ACCESS_TOKEN } from "../../lib/crypto/secret-key";
-import { bytesEqual, randomBytes, sha256, toBase64Url, utf8 } from "../../lib/encoding/bytes";
+import { bytesEqual, randomBytes, sha256, toBase64Url, toHex, utf8 } from "../../lib/encoding/bytes";
 import { logEvent } from "../../lib/observability/log";
 import { uuidv7 } from "../../lib/platform/ids";
 import { DAY_MS } from "../../lib/time/units";
@@ -27,7 +27,7 @@ export interface Tokens {
 
 /** Lowercase hex SHA-256: how secrets and refresh tokens are kept (`secret_hash`, `refresh_hash`). */
 export async function hashSecret(value: string): Promise<string> {
-  return Array.from(await sha256(utf8(value)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return toHex(await sha256(utf8(value)));
 }
 
 /** A random 256-bit token, base64url. */

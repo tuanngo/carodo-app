@@ -110,10 +110,7 @@ export async function sharedPage(env: Env, position: FeedPosition, clock: FeedCl
     env.DB.prepare(COUNTS_SQL).bind(ids),
   ]);
   const byItem = groupBy((drives?.results ?? []) as DriveRow[]);
-  const reactions = new Map<string, Record<string, number>>();
-  for (const row of (counts?.results ?? []) as Count[]) {
-    reactions.set(row.item_id, { ...reactions.get(row.item_id), [row.reaction]: row.n });
-  }
+  const reactions = countsByItem((counts?.results ?? []) as Count[]);
   const items = kept.flatMap(
     (row) => feedItem(row, byItem.get(row.id) ?? [], reactions.get(row.id) ?? {}, clock.quarter) ?? [],
   );
@@ -160,10 +157,7 @@ export async function readerPage(
   // The reader's items holding a drive others cannot see yet, rebuilt from all their drives.
   const ownDrives = (ownResult?.results ?? []) as OwnRow[];
   const pending = new Set(ownDrives.filter((drive) => drive.visible_at > clock.quarter).map((d) => d.item_id));
-  const counts = new Map<string, Record<string, number>>();
-  for (const row of (ownCounts?.results ?? []) as Count[]) {
-    counts.set(row.item_id, { ...counts.get(row.item_id), [row.reaction]: row.n });
-  }
+  const counts = countsByItem((ownCounts?.results ?? []) as Count[]);
   const own = new Map<string, SharedItem>();
   for (const [itemId, drives] of groupBy(ownDrives)) {
     if (!pending.has(itemId)) continue;
@@ -191,8 +185,23 @@ export async function readerPage(
   };
 }
 
-function groupBy(drives: DriveRow[]): Map<string, DriveRow[]> {
-  const groups = new Map<string, DriveRow[]>();
-  for (const drive of drives) groups.set(drive.item_id, [...(groups.get(drive.item_id) ?? []), drive]);
+function groupBy<Row extends DriveRow>(drives: Row[]): Map<string, Row[]> {
+  const groups = new Map<string, Row[]>();
+  for (const drive of drives) {
+    const group = groups.get(drive.item_id);
+    if (group) group.push(drive);
+    else groups.set(drive.item_id, [drive]);
+  }
   return groups;
+}
+
+/** Each item's reaction counts, from a counts query's rows. */
+function countsByItem(rows: Count[]): Map<string, Record<string, number>> {
+  const counts = new Map<string, Record<string, number>>();
+  for (const row of rows) {
+    const item = counts.get(row.item_id);
+    if (item) item[row.reaction] = row.n;
+    else counts.set(row.item_id, { [row.reaction]: row.n });
+  }
+  return counts;
 }

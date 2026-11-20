@@ -37,6 +37,7 @@ export function Layout({
   legal = false,
   noindex = false,
   translations = landingCopy,
+  nonce,
   children,
 }: {
   title: string;
@@ -48,6 +49,8 @@ export function Layout({
   /** Soft 404 and similar pages that must not enter the index. */
   noindex?: boolean;
   translations?: SiteTranslations;
+  /** The request's CSP nonce (`secureHeaders`): the only inline styles and scripts it runs. */
+  nonce?: string;
   children: Child;
 }) {
   const siteId = analyticsSiteId();
@@ -85,15 +88,15 @@ export function Layout({
             {description && <meta name="twitter:description" content={description} />}
           </>
         )}
-        <style>{raw(publicStyles)}</style>
+        <style nonce={nonce}>{raw(publicStyles)}</style>
         {siteId && (
           <>
-            <script>
+            <script nonce={nonce}>
               {raw(
                 "window.linkto=window.linkto||function(){(window.linkto.q=window.linkto.q||[]).push(arguments)};window.traks=window.linkto;",
               )}
             </script>
-            <script defer data-site={siteId} src="https://t.linkto.so/t.js" />
+            <script nonce={nonce} defer data-site={siteId} src="https://t.linkto.so/t.js" />
           </>
         )}
       </head>
@@ -107,7 +110,7 @@ export function Layout({
         {children}
 
         <SiteFooter lang={lang} languageSwitcher={languageSwitcher} />
-        {languageSwitcher && <script>{raw(createLanguageScript(translations))}</script>}
+        {languageSwitcher && <script nonce={nonce}>{raw(createLanguageScript(translations))}</script>}
       </body>
     </html>
   );

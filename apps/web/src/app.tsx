@@ -1,6 +1,7 @@
 import { type Context, Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { html } from "hono/html";
+import { NONCE, secureHeaders } from "hono/secure-headers";
 import { type SiteImage, siteMedia } from "./.generated/media";
 import { FAVICON_SVG, SITE_WEBMANIFEST, siteImage } from "./assets";
 import type { WebEnv } from "./env";
@@ -23,6 +24,26 @@ function pageLanguage(c: Context<{ Bindings: WebEnv }>): SiteLanguage {
     acceptLanguage: c.req.header("Accept-Language"),
   });
 }
+
+// Before share pages render what people typed (a vehicle label): only this origin's code, the inline
+// styles and scripts carrying the request's nonce, the analytics script and its own endpoint, and
+// the landing's clips; no framing. Hono's defaults add HSTS, nosniff and a no-referrer policy.
+app.use(
+  secureHeaders({
+    contentSecurityPolicy: {
+      defaultSrc: ["'self'"],
+      scriptSrc: [NONCE, "https://t.linkto.so"],
+      styleSrc: [NONCE],
+      imgSrc: ["'self'", "data:"],
+      mediaSrc: ["https://media.carodo.app"],
+      connectSrc: ["'self'", "https://t.linkto.so"],
+      objectSrc: ["'none'"],
+      baseUri: ["'none'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Static brand assets: inline, no R2 or Assets binding (P6)
@@ -73,16 +94,28 @@ function pageUrl(c: Context<{ Bindings: WebEnv }>): string {
   return `${origin}${pathname}`;
 }
 
-app.get("/", (c) => c.html(html`<!doctype html>${<LandingPage lang={pageLanguage(c)} url={pageUrl(c)} />}`));
-app.get("/privacy", (c) => c.html(html`<!doctype html>${<PrivacyPage lang={pageLanguage(c)} url={pageUrl(c)} />}`));
-app.get("/terms", (c) => c.html(html`<!doctype html>${<TermsPage lang={pageLanguage(c)} url={pageUrl(c)} />}`));
+app.get("/", (c) =>
+  c.html(
+    html`<!doctype html>${<LandingPage lang={pageLanguage(c)} url={pageUrl(c)} nonce={c.get("secureHeadersNonce")} />}`,
+  ),
+);
+app.get("/privacy", (c) =>
+  c.html(
+    html`<!doctype html>${<PrivacyPage lang={pageLanguage(c)} url={pageUrl(c)} nonce={c.get("secureHeadersNonce")} />}`,
+  ),
+);
+app.get("/terms", (c) =>
+  c.html(
+    html`<!doctype html>${<TermsPage lang={pageLanguage(c)} url={pageUrl(c)} nonce={c.get("secureHeadersNonce")} />}`,
+  ),
+);
 
 app.notFound((c) => {
   const lang = pageLanguage(c);
   const t = notFoundCopy[lang];
   return c.html(
     html`<!doctype html>${(
-      <Layout title={t.title} lang={lang} noindex>
+      <Layout title={t.title} lang={lang} noindex nonce={c.get("secureHeadersNonce")}>
         <main class="mx-auto max-w-5xl px-4 py-16 text-center sm:px-6">
           <h1 class="mb-2 text-2xl font-semibold tracking-tight">{t.heading}</h1>
           <p class="text-muted-foreground">{t.body}</p>

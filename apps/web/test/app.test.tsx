@@ -50,6 +50,23 @@ describe("web", () => {
     expect(viHtml).not.toContain("<script");
   });
 
+  it("lets a page run only its own nonce-carrying inline code, and never be framed", async () => {
+    for (const path of ["/", "/privacy", "/terms", "/t/unknown"]) {
+      const response = await exports.default.fetch(`https://carodo.test${path}`);
+      const csp = response.headers.get("content-security-policy") ?? "";
+      const nonce = /'nonce-([^']+)'/.exec(csp)?.[1];
+      expect(nonce, path).toBeTruthy();
+      expect(csp, path).toContain("frame-ancestors 'none'");
+      expect(csp, path).not.toContain("unsafe-inline");
+      expect(response.headers.get("x-content-type-options"), path).toBe("nosniff");
+      expect(response.headers.get("strict-transport-security"), path).toContain("max-age=");
+      const html = await response.text();
+      const tags = html.match(/<(script|style)\b[^>]*>/g) ?? [];
+      expect(tags.length, path).toBeGreaterThan(0);
+      for (const tag of tags) expect(tag, path).toContain(`nonce="${nonce}"`);
+    }
+  });
+
   it("reaches the api through the service binding", async () => {
     expect(await env.API.ping()).toEqual({ environment: "test-api" });
   });
@@ -137,7 +154,7 @@ describe("web", () => {
 
   it.each(["/", "/privacy", "/terms"])("ships compiled CSS without a browser styling runtime on %s", async (path) => {
     const html = await (await exports.default.fetch(`https://carodo.test${path}`)).text();
-    const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+    const css = html.match(/<style\b[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? "";
     expect(css).toContain(".bg-background");
     expect(css).toContain(".typeset");
     expect(css).toContain("prefers-color-scheme:dark");

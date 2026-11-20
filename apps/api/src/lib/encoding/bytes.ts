@@ -30,6 +30,11 @@ export function fromBase64(text: string): Bytes {
   return bytes;
 }
 
+/** Lowercase hex, two digits a byte: how our hashes are stored (`secret_hash`, `name_hash`). */
+export function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /** `length` bytes from the platform CSPRNG. */
 export function randomBytes(length: number): Bytes {
   return crypto.getRandomValues(new Uint8Array(length));

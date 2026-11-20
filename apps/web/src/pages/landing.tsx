@@ -5,10 +5,10 @@ import { Layout } from "../layout";
 import { LandingCta, LandingFaq, LandingLoop, LandingPrivacy, LandingScreens } from "./landing-blocks";
 
 /** Landing: hero, product loop (Auto Mode → Journeys → Replay), privacy, FAQ, closing CTA. No Feed. */
-export function LandingPage({ lang = "en", url }: { lang?: SiteLanguage; url?: string }) {
+export function LandingPage({ lang = "en", url, nonce }: { lang?: SiteLanguage; url?: string; nonce?: string }) {
   const t = landingCopy[lang];
   return (
-    <Layout title={t.title} description={t.description} url={url} lang={lang} languageSwitcher>
+    <Layout title={t.title} description={t.description} url={url} lang={lang} languageSwitcher nonce={nonce}>
       <main>
         <section
           class="mx-auto flex max-w-5xl flex-col items-center px-4 pt-12 pb-16 text-center sm:px-6 sm:pt-20 sm:pb-20"

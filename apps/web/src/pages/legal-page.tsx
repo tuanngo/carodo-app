@@ -20,8 +20,10 @@ export function LegalPage({
   document,
   lang = "en",
   url,
+  nonce,
 }: {
   document: LegalDocument;
+  nonce?: string;
   lang?: SiteLanguage;
   url?: string;
 }) {
@@ -49,6 +51,7 @@ export function LegalPage({
       legal
       languageSwitcher
       translations={translations}
+      nonce={nonce}
     >
       <main class="mx-auto w-full max-w-4xl px-4 pt-10 pb-20 sm:px-6 sm:pt-16">
         <article class="typeset typeset-carodo min-w-0" aria-label={t.heading} data-i18n-aria="heading">
