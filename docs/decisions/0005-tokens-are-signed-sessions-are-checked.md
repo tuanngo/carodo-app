@@ -16,12 +16,15 @@
   - **Bound to the device's key:** a request with an assertion must come from the key its session
     was opened with.
   - **Refresh tokens** rotate on every use, one `sessions` row each; a rotated token presented
-    again, or shown by another key, revokes the whole family.
+    again within 30 days, or shown by another key, revokes the whole family (owner, 2026-11-20).
   - **Secrets at rest are hashes:** SHA-256 for the account secret and refresh tokens (random,
     256-bit), HMAC for held usernames (guessable, so keyed).
 - Reason: one indexed read is far cheaper than the promise it keeps, and it can share a batch
   with the request's own query.
 - Consequence:
-  - Rotated rows accumulate (one per refresh); a cron prunes revoked rows past their expiry.
+  - Rotated rows accumulate (one per refresh); the hourly prune deletes a rotated or revoked row
+    30 days after (`sessions_on_revoked_at`) and any row past its expiry. A rotated token used
+    later than that is only unknown: refused without revoking the family, which every refresh's
+    App Attest assertion makes acceptable.
   - Rotating `SECRET_KEY` signs everyone out and releases held usernames early: do it only
     for a leak, and say so.

@@ -188,6 +188,43 @@ describe("prune.expired", () => {
     expect(holds.results).toEqual([{ name_hash: "held" }]);
   });
 
+  it("deletes a rotated or revoked session 30 days after, and keeps a live one", async () => {
+    const phone = await attestDevice(env.APP_ID);
+    const claim = await phone.send(
+      "POST",
+      "/v1/accounts",
+      { username: `prune_${crypto.randomUUID().slice(0, 8)}`, deviceCheckToken: "dc" },
+      { authorization: `Bearer ${phone.guestToken}` },
+    );
+    expect(claim.status).toBe(201);
+    const { profile } = await claim.json<{ profile: { id: string } }>();
+    const live = await env.DB.prepare("SELECT app_key_id, family_id FROM sessions WHERE account_id = ?")
+      .bind(profile.id)
+      .first<{ app_key_id: string; family_id: string }>();
+    const now = Date.now();
+    const DAY = 24 * HOUR;
+    await env.DB.prepare(
+      `INSERT INTO sessions (id, account_id, app_key_id, family_id, refresh_hash, expires_at, created_at, revoked_at)
+       VALUES ('rotated-old', ?1, ?2, ?3, 'hash-old', ?4, ?5, ?6), ('rotated-new', ?1, ?2, ?3, 'hash-new', ?4, ?5, ?7)`,
+    )
+      .bind(
+        profile.id,
+        live?.app_key_id,
+        live?.family_id,
+        now + 60 * DAY,
+        now - 40 * DAY,
+        now - 31 * DAY,
+        now - 29 * DAY,
+      )
+      .run();
+    await runScheduled(env, now);
+    expect(await count("SELECT COUNT(*) AS n FROM sessions WHERE id = 'rotated-old'")).toBe(0);
+    expect(await count("SELECT COUNT(*) AS n FROM sessions WHERE id = 'rotated-new'")).toBe(1);
+    expect(
+      await count("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ? AND revoked_at IS NULL", profile.id),
+    ).toBe(1);
+  });
+
   it("deletes drives, tombstones and items once they leave the 7-day Feed, reactions with them", async () => {
     const now = Date.now();
     const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);

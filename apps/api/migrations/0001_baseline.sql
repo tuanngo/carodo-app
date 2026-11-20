@@ -63,6 +63,8 @@ CREATE INDEX sessions_on_family_id ON sessions (family_id);    -- refresh reuse:
 -- A family is one device's session: its live row is the one an access token is checked against.
 CREATE UNIQUE INDEX sessions_on_live_family_id ON sessions (family_id) WHERE revoked_at IS NULL;
 CREATE INDEX sessions_on_expires_at ON sessions (expires_at);                                -- prune
+-- A rotated or revoked session is kept 30 days for reuse detection, then pruned (not its 90 days).
+CREATE INDEX sessions_on_revoked_at ON sessions (revoked_at) WHERE revoked_at IS NOT NULL;   -- prune
 
 -- A deleted account's username, and a renamed account's old one, held 90 days so nobody can take
 -- it at once to impersonate (specs/account.md). Linked to nothing: an HMAC of the lowercase name

@@ -10,6 +10,14 @@ import { FEED_WINDOW_MS } from "../shared/coarse-time";
  */
 
 const BATCH = 1000;
+/**
+ * Tables written by every sign-in and refresh: a run takes more of them, so a busy hour's rows are
+ * gone by the next runs (cost C10: bounded, and finished by the next run, never looped).
+ */
+const AUTH_BATCH = 5000;
+
+/** How long a rotated or revoked session is kept: a reuse of its refresh token revokes the family until then. */
+export const REVOKED_SESSION_KEEP_MS = 30 * DAY_MS;
 
 interface PruneTarget {
   table: string;
@@ -21,17 +29,22 @@ interface PruneTarget {
   keepMs?: number;
   /** Instead of `now − keepMs`: the cutoff a row's column is at or before when it goes. */
   cutoff?: (now: number) => number | string;
+  /** Rows a run deletes at most (BATCH by default). */
+  batch?: number;
   /** Why this table is read whole, for a table kept small without an index on `column` (cost C1). */
   fullScan?: string;
 }
 
 const TARGETS: PruneTarget[] = [
   // Spent or never used: valid 5 minutes.
-  { table: "auth_challenges", key: "id", column: "expires_at" },
+  { table: "auth_challenges", key: "id", column: "expires_at", batch: AUTH_BATCH },
   // Released after 90 days.
   { table: "username_holds", key: "name_hash", column: "released_at" },
-  // A refresh token row, live or rotated, is useless once expired; reuse is detected until then.
-  { table: "sessions", key: "id", column: "expires_at" },
+  // A refresh token row, live or rotated, is useless once expired.
+  { table: "sessions", key: "id", column: "expires_at", batch: AUTH_BATCH },
+  // A rotated or revoked one 30 days after (sessions_on_revoked_at, a partial index the comparison
+  // implies): reuse detection needs no longer, since every refresh also needs the key's assertion.
+  { table: "sessions", key: "id", column: "revoked_at", keepMs: REVOKED_SESSION_KEEP_MS, batch: AUTH_BATCH },
   // Username changes count toward the limit for 30 days (PUT /v1/me/profile).
   { table: "username_changes", key: "id", column: "changed_at", keepMs: 30 * DAY_MS },
   // The Feed deletes itself (P9, ADR 0007): a drive, or an unpublished drive's tombstone, an hour
@@ -53,10 +66,10 @@ export type PruneCounts = Record<string, number>;
 
 export async function pruneExpired(db: D1Database, now: number): Promise<PruneCounts> {
   const results = await db.batch(
-    TARGETS.map(({ table, key, column, keepMs = 0, cutoff, fullScan }) =>
+    TARGETS.map(({ table, key, column, keepMs = 0, cutoff, batch = BATCH, fullScan }) =>
       db
         .prepare(
-          `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE ${column} <= ? LIMIT ${BATCH})` +
+          `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE ${column} <= ? LIMIT ${batch})` +
             (fullScan === undefined ? "" : ` -- full scan: ${fullScan}`),
         )
         .bind(cutoff ? cutoff(now) : now - keepMs),
