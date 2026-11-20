@@ -48,6 +48,13 @@ export function parseClaim(body: unknown): Result<ClaimInput> {
   return ok({ username: body.username, sharing, deviceCheckToken: token });
 }
 
+/**
+ * The most accounts one App Attest key may claim, deleted ones included while their sessions
+ * remain (audit C2, owner 2026-11-20): a person may delete and claim again, but a device cannot
+ * claim and delete in a loop to hold names (a deleted name is held 90 days).
+ */
+export const MAX_ACCOUNTS_PER_KEY = 3;
+
 export async function claimAccount(env: Env, input: ClaimInput, keyId: string, now: number): Promise<Result<Claimed>> {
   // A held name answers as taken: nobody learns that an account was deleted or renamed. This read
   // only refuses early; the insert checks the hold again, since the owner may be deleted after it.
@@ -66,7 +73,8 @@ export async function claimAccount(env: Env, input: ClaimInput, keyId: string, n
   const createAccount = env.DB.prepare(
     `INSERT INTO accounts (id, username, secret_hash, feed_opt_in, display_as, show_vehicle, created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, ?, ?
-     WHERE NOT EXISTS (SELECT 1 FROM username_holds WHERE name_hash = ? AND released_at > ?)`,
+     WHERE NOT EXISTS (SELECT 1 FROM username_holds WHERE name_hash = ? AND released_at > ?)
+       AND (SELECT count(DISTINCT account_id) FROM sessions WHERE app_key_id = ?) < ?`,
   ).bind(
     accountId,
     username,
@@ -78,12 +86,21 @@ export async function claimAccount(env: Env, input: ClaimInput, keyId: string, n
     now,
     await usernameHoldHash(env.SECRET_KEY, username),
     now,
+    keyId,
+    MAX_ACCOUNTS_PER_KEY,
   );
 
   try {
     // One transaction: never an account without its first session, nor a session without it.
     const [created] = await env.DB.batch([createAccount, session.statement]);
-    if (created?.meta.changes !== 1) return fail("conflict", "This username is taken.", "username_taken");
+    if (created?.meta.changes !== 1) {
+      // The limit is checked in the statement (two claims at once cannot both pass); telling it
+      // from a held name needs one indexed read, only when refused.
+      if (await claimLimitReached(env, keyId)) {
+        return fail("forbidden", "This device has claimed its accounts.", "claim_limit");
+      }
+      return fail("conflict", "This username is taken.", "username_taken");
+    }
   } catch (error) {
     if (isUsernameConflict(error)) return fail("conflict", "This username is taken.", "username_taken");
     throw error;
@@ -91,6 +108,14 @@ export async function claimAccount(env: Env, input: ClaimInput, keyId: string, n
 
   writeEvent(env.EVENTS, "account.created");
   return ok({ accountSecret, session: await session.issue(), profile: { id: accountId, username } });
+}
+
+/** Whether the key has claimed its accounts, through `sessions_on_app_key_id`. */
+async function claimLimitReached(env: Env, keyId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT count(DISTINCT account_id) AS n FROM sessions WHERE app_key_id = ?")
+    .bind(keyId)
+    .first<{ n: number }>();
+  return (row?.n ?? 0) >= MAX_ACCOUNTS_PER_KEY;
 }
 
 /** D1's error when another account has the name (the unique index decides a race). */

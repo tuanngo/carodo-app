@@ -59,6 +59,7 @@ CREATE TABLE sessions (
   revoked_at   INTEGER
 );
 CREATE INDEX sessions_on_account_id ON sessions (account_id);  -- revoke on deletion, erase
+CREATE INDEX sessions_on_app_key_id ON sessions (app_key_id, account_id);  -- accounts claimed per key
 CREATE INDEX sessions_on_family_id ON sessions (family_id);    -- refresh reuse: revoke the family
 -- A family is one device's session: its live row is the one an access token is checked against.
 CREATE UNIQUE INDEX sessions_on_live_family_id ON sessions (family_id) WHERE revoked_at IS NULL;

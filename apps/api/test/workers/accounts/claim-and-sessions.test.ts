@@ -19,7 +19,8 @@ function claim(device: TestDevice, body: Record<string, unknown>, guestToken = d
     "POST",
     "/v1/accounts",
     { deviceCheckToken: "dc-token", ...body },
-    { authorization: `Bearer ${guestToken}` },
+    // Each device its own address: the file's claims would share one RL_AUTH bucket otherwise.
+    { authorization: `Bearer ${guestToken}`, "cf-connecting-ip": device.keyId },
   );
 }
 
@@ -116,6 +117,33 @@ describe("POST /v1/accounts", () => {
       body: JSON.stringify({ username: uniqueName() }),
     });
     expect(unsigned.status).toBe(401);
+  });
+
+  it("answers 403 claim_limit once a key has claimed three accounts, deleted ones included", async () => {
+    const device = await attestDevice(env.APP_ID);
+    const first = await claimed(device);
+    await claimed(device);
+    // A deleted account still counts while its sessions remain.
+    const deleted = await device.send("DELETE", "/v1/account", undefined, {
+      authorization: `Bearer ${first.session.accessToken}`,
+    });
+    expect(deleted.status).toBe(204);
+    await claimed(device);
+    const fourth = await claim(device, { username: uniqueName() });
+    expect(fourth.status).toBe(403);
+    expect(await fourth.json()).toMatchObject({ code: "claim_limit" });
+
+    // Another key is not limited by this one.
+    expect((await claim(await attestDevice(env.APP_ID), { username: uniqueName() })).status).toBe(201);
+  });
+
+  it("counts an account once however many times its session was refreshed", async () => {
+    const device = await attestDevice(env.APP_ID);
+    const account = await claimed(device);
+    const refreshed = await device.send("POST", "/v1/auth/refresh", { refreshToken: account.session.refreshToken });
+    expect(refreshed.status).toBe(200);
+    await claimed(device);
+    expect((await claim(device, { username: uniqueName() })).status).toBe(201);
   });
 
   it("names the field it refuses", async () => {
