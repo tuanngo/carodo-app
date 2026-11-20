@@ -1,4 +1,5 @@
 import { DAY_MS } from "../../lib/time/units";
+import { FEED_WEATHER, type FeedWeather } from "../drives/input";
 import { agoLabel, FEED_WINDOW_MS, feedClock } from "../shared/coarse-time";
 
 /**
@@ -106,8 +107,8 @@ export interface FeedDrive {
   distanceM: number;
   ago: string;
   partOfDay: string;
-  /** Present only when the device reported rain. */
-  weather?: "rain";
+  /** Present only for weather worth showing; never clear or unknown. */
+  weather?: FeedWeather;
   shape?: { version: 1; points: number[][] } | null;
 }
 
@@ -153,7 +154,7 @@ export function feedItem(
       distanceM: drive.distance_m,
       ago: agoLabel(drive.ended_at, now),
       partOfDay: drive.part_of_day,
-      ...(drive.weather === "rain" ? { weather: "rain" as const } : {}),
+      ...(isFeedWeather(drive.weather) ? { weather: drive.weather } : {}),
       ...(drive.shape === null ? {} : { shape: JSON.parse(drive.shape) as FeedDrive["shape"] }),
     }),
   );
@@ -173,6 +174,10 @@ export function feedItem(
       myReaction: null,
     },
   };
+}
+
+function isFeedWeather(value: string | null): value is FeedWeather {
+  return FEED_WEATHER.includes(value as FeedWeather);
 }
 
 /** The item a reader sees: their own carries "You" and its trips; their reaction from `mine`. */

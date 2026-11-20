@@ -12,7 +12,13 @@ import { fail, ok, type Result } from "../shared/result";
  */
 
 export const PARTS_OF_DAY = ["early_morning", "morning", "midday", "afternoon", "evening", "night", "late_night"];
-export const WEATHER = ["rain", "clear", "unknown"];
+/**
+ * The weather a drive met, as the device decided it from its own facts (carodo-ios ADR 0021); the
+ * server never looks weather up. The first four are shown on the Feed, clear and unknown never.
+ */
+export const FEED_WEATHER = ["heavy_rain", "snow", "rain", "fog"] as const;
+export type FeedWeather = (typeof FEED_WEATHER)[number];
+export const WEATHER = [...FEED_WEATHER, "clear", "unknown"];
 
 /** The figures a drive may have (contract `DriveInput`). */
 export const RANGES = {
@@ -82,7 +88,7 @@ export function parseDriveInput(body: unknown, now: number): Result<DriveFields>
   if (!PARTS_OF_DAY.includes(body.partOfDay as string)) {
     return fail("validation", "partOfDay is not one of the parts of day.");
   }
-  if (!WEATHER.includes(body.weather as string)) return fail("validation", "weather must be rain, clear or unknown.");
+  if (!WEATHER.includes(body.weather as string)) return fail("validation", "weather is not one of the weather labels.");
   const distanceM = numberIn(body.distanceM, "distanceM", 0, Number.MAX_VALUE);
   if (!distanceM.ok) return distanceM;
   const elapsed = numberIn(body.elapsedDurationS, "elapsedDurationS", 0, Number.MAX_VALUE);

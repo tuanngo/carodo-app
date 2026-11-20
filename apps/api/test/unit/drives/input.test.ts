@@ -69,13 +69,19 @@ describe("parseDriveInput", () => {
     });
   });
 
+  it("accepts every weather label of the contract", () => {
+    for (const weather of ["heavy_rain", "snow", "rain", "fog", "clear", "unknown"]) {
+      expect(parseDriveInput({ ...valid, weather }, NOW)).toMatchObject({ ok: true, data: { weather } });
+    }
+  });
+
   it("refuses malformed fields as validation, naming them", () => {
     const cases: [Record<string, unknown>, string][] = [
       [{ revision: 0 }, "revision"],
       [{ endedAt: "yesterday" }, "endedAt"],
       [{ localStartHour: 24 }, "localStartHour"],
       [{ partOfDay: "dawn" }, "partOfDay"],
-      [{ weather: "snow" }, "weather"],
+      [{ weather: "hail" }, "weather"],
       [{ vehicle: null }, "vehicle"],
       [{ vehicle: { make: "x".repeat(41) } }, "vehicle.make"],
       [{ vehicle: { make: "Kia\nK3" } }, "vehicle.make"],

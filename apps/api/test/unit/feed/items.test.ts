@@ -70,6 +70,15 @@ describe("feedItem", () => {
     expect(feedItem(item(), [drive({ ended_at: ended })], {}, ended + 5 * MINUTE)?.item.ago).toBe("now");
   });
 
+  it("shows heavy rain, snow, rain and fog, never clear or unknown", () => {
+    for (const weather of ["heavy_rain", "snow", "rain", "fog"]) {
+      expect(feedItem(item(), [drive({ weather })], {}, NOW)?.item.drives[0]?.weather).toBe(weather);
+    }
+    for (const weather of ["clear", "unknown", null]) {
+      expect(feedItem(item(), [drive({ weather })], {}, NOW)?.item.drives[0]).not.toHaveProperty("weather");
+    }
+  });
+
   it("sends a drive as its figures and age only, never a time", () => {
     const trip = drive({ weather: "rain", shape: JSON.stringify({ version: 1, points: [[0, 0]] }) });
     const shared = feedItem(item(), [trip, drive()], {}, NOW);
